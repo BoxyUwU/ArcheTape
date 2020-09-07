@@ -27,7 +27,7 @@ impl<'a, T: 'static> Deref for AnyMapBorrow<'a, T> {
     }
 }
 
-pub struct AnyMapBorrowMut<'a, T> {
+pub struct AnyMapBorrowMut<'a, T: 'static> {
     pub guard: RwLockWriteGuard<'a, Box<dyn Any>>,
     phantom: PhantomData<&'a mut T>,
 }
