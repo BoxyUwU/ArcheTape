@@ -1,6 +1,7 @@
 use super::anymap::{AnyMap, AnyMapBorrow, AnyMapBorrowMut};
 use super::bundle::Bundle;
 use super::lifetime_anymap::{LifetimeAnyMap, LifetimeAnyMapBorrow, LifetimeAnyMapBorrowMut};
+//use super::query::{Query, ValidQuery};
 use std::any::TypeId;
 use std::error::Error;
 
@@ -20,7 +21,7 @@ impl Archetype {
 }
 
 pub struct World {
-    archetypes: Vec<Archetype>,
+    pub archetypes: Vec<Archetype>,
     owned_resources: AnyMap,
 }
 
@@ -54,6 +55,10 @@ impl World {
             self.archetypes.len() - 1
         }
     }
+
+    //pub fn archetype_access<T: ValidQuery>(&self) -> Vec<usize> {
+    //    T::archetype_access(self)
+    //}
 
     pub fn run(&mut self) -> RunWorldContext {
         RunWorldContext {
