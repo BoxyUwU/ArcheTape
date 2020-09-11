@@ -42,7 +42,7 @@ macro_rules! impl_query_infos {
                 let ($($x,)*) = self;
 
                 Some(($(
-                    <$x as Borrow<'a>>::borrow_from_iter($x),
+                    <$x as Borrow<'a>>::borrow_from_iter($x)?,
                 )*))
             }
         }
@@ -79,14 +79,14 @@ impl<'a, T: QueryInfos, U: Iters<'a, T>> Iterator for QueryIter<'a, T, U> {
     }
 }
 
-pub trait Borrow<'b> {
+pub trait Borrow<'b>: Sized {
     type Of;
 
     fn either_iter_from_guard<'a, 'guard: 'a>(
         guard: &'a mut RwLockEitherGuard<'guard>,
     ) -> EitherIter<'a, Self::Of>;
 
-    fn borrow_from_iter<'a>(iter: &'a mut EitherIter<'b, Self::Of>) -> Self;
+    fn borrow_from_iter<'a>(iter: &'a mut EitherIter<'b, Self::Of>) -> Option<Self>;
 }
 
 impl<'b, T: 'static> Borrow<'b> for &'b T {
@@ -103,9 +103,9 @@ impl<'b, T: 'static> Borrow<'b> for &'b T {
         }
     }
 
-    fn borrow_from_iter<'a>(iter: &'a mut EitherIter<'b, Self::Of>) -> Self {
+    fn borrow_from_iter<'a>(iter: &'a mut EitherIter<'b, Self::Of>) -> Option<Self> {
         match iter {
-            EitherIter::Immut(iter) => iter.next().unwrap(),
+            EitherIter::Immut(iter) => iter.next(),
             _ => panic!("awd"),
         }
     }
@@ -124,9 +124,9 @@ impl<'b, T: 'static> Borrow<'b> for &'b mut T {
         }
     }
 
-    fn borrow_from_iter<'a>(iter: &'a mut EitherIter<'b, Self::Of>) -> Self {
+    fn borrow_from_iter<'a>(iter: &'a mut EitherIter<'b, Self::Of>) -> Option<Self> {
         match iter {
-            EitherIter::Mut(iter) => iter.next().unwrap(),
+            EitherIter::Mut(iter) => iter.next(),
             _ => panic!("awd"),
         }
     }
@@ -156,28 +156,63 @@ mod tests {
         archetype.add((15_u32, 14_u64)).unwrap();
         archetype.add((20_u32, 16_u64)).unwrap();
 
-        let mut query_borrow = QueryBorrow::<'_, (&u32, &u64)> {
+        let mut query_borrow = QueryBorrow::<'_, (&mut u32, &u64)> {
             lock_guards: vec![
-                RwLockEitherGuard::ReadGuard(archetype.data.get::<Vec<u32>>().unwrap().guard),
+                RwLockEitherGuard::WriteGuard(archetype.data.get_mut::<Vec<u32>>().unwrap().guard),
                 RwLockEitherGuard::ReadGuard(archetype.data.get::<Vec<u64>>().unwrap().guard),
             ],
             phantom: PhantomData,
         };
 
-        let mut query_iter = QueryIter::<
-            '_,
-            (&u32, &u64),
-            (EitherIter<'_, u32>, EitherIter<'_, u64>),
-        >::from_borrows(&mut query_borrow);
+        let query_iter =
+            QueryIter::<'_, _, (EitherIter<_>, EitherIter<_>)>::from_borrows(&mut query_borrow);
 
-        let (left, right) = query_iter.next().unwrap();
-        assert!(*left == 10);
-        assert!(*right == 12);
-        let (left, right) = query_iter.next().unwrap();
-        assert!(*left == 15);
-        assert!(*right == 14);
-        let (left, right) = query_iter.next().unwrap();
-        assert!(*left == 20);
-        assert!(*right == 16);
+        for (n, (left, right)) in query_iter.enumerate() {
+            println!("{:?}, {:?}", left, right);
+
+            if n == 0 {
+                assert!(*left == 10);
+                assert!(*right == 12);
+            } else if n == 1 {
+                assert!(*left == 15);
+                assert!(*right == 14);
+            } else if n == 2 {
+                assert!(*left == 20);
+                assert!(*right == 16);
+            } else {
+                panic!("awd");
+            }
+        }
+    }
+
+    #[test]
+    fn testttttttt() {
+        let mut archetype = Archetype::new::<(u32, u64)>();
+        archetype.add((10_u32, 12_u64)).unwrap();
+        archetype.add((15_u32, 14_u64)).unwrap();
+        archetype.add((20_u32, 16_u64)).unwrap();
+
+        let mut query_borrow = QueryBorrow::<'_, (&mut u32,)> {
+            lock_guards: vec![RwLockEitherGuard::WriteGuard(
+                archetype.data.get_mut::<Vec<u32>>().unwrap().guard,
+            )],
+            phantom: PhantomData,
+        };
+
+        let query_iter = QueryIter::<'_, _, (EitherIter<_>,)>::from_borrows(&mut query_borrow);
+
+        for (n, (left,)) in query_iter.enumerate() {
+            println!("{:?}", left);
+
+            if n == 0 {
+                assert!(*left == 10);
+            } else if n == 1 {
+                assert!(*left == 15);
+            } else if n == 2 {
+                assert!(*left == 20);
+            } else {
+                panic!("awd");
+            }
+        }
     }
 }
