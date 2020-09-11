@@ -1,7 +1,6 @@
 use super::anymap::{AnyMap, AnyMapBorrow, AnyMapBorrowMut};
 use super::bundle::Bundle;
 use super::lifetime_anymap::{LifetimeAnyMap, LifetimeAnyMapBorrow, LifetimeAnyMapBorrowMut};
-//use super::query::{Query, ValidQuery};
 use std::any::TypeId;
 use std::error::Error;
 
@@ -21,7 +20,7 @@ impl Archetype {
 }
 
 pub struct World {
-    pub archetypes: Vec<Archetype>,
+    archetypes: Vec<Archetype>,
     owned_resources: AnyMap,
 }
 
@@ -42,23 +41,11 @@ impl World {
     }
 
     pub fn find_archetype_or_insert<T: Bundle>(&mut self) -> usize {
-        let type_ids = T::type_ids();
-
-        if let Some(n) = self
-            .archetypes
-            .iter()
-            .position(|archetype| archetype.type_ids == type_ids)
-        {
-            n
-        } else {
+        self.find_archetype::<T>().unwrap_or_else(|| {
             self.archetypes.push(T::new_archetype());
             self.archetypes.len() - 1
-        }
+        })
     }
-
-    //pub fn archetype_access<T: ValidQuery>(&self) -> Vec<usize> {
-    //    T::archetype_access(self)
-    //}
 
     pub fn run(&mut self) -> RunWorldContext {
         RunWorldContext {
@@ -118,6 +105,7 @@ mod tests {
         let mut run_ctx = world.run();
         let mut foo = 10_u32;
         run_ctx.insert_temp_resource(&mut foo);
+
         let mut foo_borrow = run_ctx.get_temp_resource_mut::<u32>().unwrap();
         *foo_borrow += 1;
     }
@@ -129,7 +117,8 @@ mod tests {
         let mut run_ctx = world.run();
         let mut foo = 10_u32;
         run_ctx.insert_temp_resource(&mut foo);
-        let _borrow = run_ctx.get_temp_resource::<u32>().unwrap();
+
+        run_ctx.get_temp_resource::<u32>().unwrap();
     }
 
     #[test]
@@ -142,12 +131,7 @@ mod tests {
         run_ctx.insert_temp_resource(&mut foo);
 
         let _borrow_1 = run_ctx.get_temp_resource_mut::<u32>().unwrap();
-        let borrow_2 = run_ctx.get_temp_resource_mut::<u32>();
-
-        match &borrow_2 {
-            Ok(_) => panic!("Should fail"),
-            _ => (),
-        }
+        assert!(run_ctx.get_temp_resource_mut::<u32>().is_err());
     }
 
     #[test]
@@ -173,12 +157,7 @@ mod tests {
         run_ctx.insert_temp_resource(&mut foo);
 
         let _borrow_1 = run_ctx.get_temp_resource::<u32>().unwrap();
-        let borrow_2 = run_ctx.get_temp_resource_mut::<u32>();
-
-        match &borrow_2 {
-            Ok(_) => panic!("Should fail"),
-            _ => (),
-        }
+        assert!(run_ctx.get_temp_resource_mut::<u32>().is_err());
     }
 
     #[test]
@@ -190,20 +169,9 @@ mod tests {
 
         run_ctx.insert_temp_resource(&mut foo);
 
-        {
-            let _borrow = run_ctx.get_temp_resource_mut::<u32>().unwrap();
-        }
-
-        {
-            let _borrow = run_ctx.get_temp_resource_mut::<u32>().unwrap();
-        }
-
-        {
-            let _borrow = run_ctx.get_temp_resource_mut::<u32>().unwrap();
-        }
-
-        {
-            let _borrow = run_ctx.get_temp_resource_mut::<u32>().unwrap();
-        }
+        run_ctx.get_temp_resource_mut::<u32>().unwrap();
+        run_ctx.get_temp_resource_mut::<u32>().unwrap();
+        run_ctx.get_temp_resource_mut::<u32>().unwrap();
+        run_ctx.get_temp_resource_mut::<u32>().unwrap();
     }
 }

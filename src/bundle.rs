@@ -33,11 +33,11 @@ macro_rules! impl_bundle {
             }
 
             fn add_to_archetype(self, archetype: &mut Archetype) -> Result<(), Box<dyn Error>> {
-                let ($($x,)*) = self;
-
                 if Self::type_ids() != archetype.type_ids {
                     return Err("Components did not match archetype".into());
                 }
+
+                let ($($x,)*) = self;
 
                 $(
                     archetype.data.get_mut::<Vec<$x>>().unwrap().push($x);

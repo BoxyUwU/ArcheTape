@@ -23,7 +23,7 @@ impl<'a, T: 'static> Deref for AnyMapBorrow<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.guard.deref().downcast_ref::<T>().unwrap()
+        self.guard.downcast_ref::<T>().unwrap()
     }
 }
 
@@ -45,13 +45,13 @@ impl<'a, T: 'static> Deref for AnyMapBorrowMut<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.guard.deref().downcast_ref::<T>().unwrap()
+        self.guard.downcast_ref::<T>().unwrap()
     }
 }
 
 impl<'a, T: 'static> DerefMut for AnyMapBorrowMut<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.guard.deref_mut().downcast_mut::<T>().unwrap()
+        self.guard.downcast_mut::<T>().unwrap()
     }
 }
 

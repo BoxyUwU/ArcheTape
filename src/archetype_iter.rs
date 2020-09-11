@@ -99,14 +99,14 @@ impl<'b, T: 'static> Borrow<'b> for &'b T {
             RwLockEitherGuard::ReadGuard(guard) => {
                 EitherIter::Immut(guard.downcast_ref::<Vec<T>>().unwrap().iter())
             }
-            _ => panic!("awd"),
+            _ => unreachable!(),
         }
     }
 
     fn borrow_from_iter<'a>(iter: &'a mut EitherIter<'b, Self::Of>) -> Option<Self> {
         match iter {
             EitherIter::Immut(iter) => iter.next(),
-            _ => panic!("awd"),
+            _ => unreachable!(),
         }
     }
 }
@@ -120,14 +120,14 @@ impl<'b, T: 'static> Borrow<'b> for &'b mut T {
             RwLockEitherGuard::WriteGuard(guard) => {
                 EitherIter::Mut(guard.downcast_mut::<Vec<T>>().unwrap().iter_mut())
             }
-            _ => panic!("awd"),
+            _ => unreachable!(),
         }
     }
 
     fn borrow_from_iter<'a>(iter: &'a mut EitherIter<'b, Self::Of>) -> Option<Self> {
         match iter {
             EitherIter::Mut(iter) => iter.next(),
-            _ => panic!("awd"),
+            _ => unreachable!(),
         }
     }
 }
