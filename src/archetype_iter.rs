@@ -13,9 +13,10 @@ pub enum RwLockEitherGuard<'a> {
     ReadGuard(RwLockReadGuard<'a, Box<dyn Any>>),
 }
 
-pub struct QueryBorrow<'guard, T: QueryInfos> {
+pub struct QueryBorrow<'b, 'guard, T: QueryInfos + 'b> {
     lock_guards: Vec<RwLockEitherGuard<'guard>>,
     phantom: PhantomData<T>,
+    phantom2: PhantomData<&'b ()>,
 }
 
 pub trait QueryInfos {}
@@ -24,9 +25,18 @@ macro_rules! impl_query_infos {
     ($($x:ident)*) => {
         impl<'b, $($x: Borrow<'b>,)*> QueryInfos for ($($x,)*) { }
 
-        impl<'g: 'b, 'b, $($x: Borrow<'b>,)*> QueryBorrow<'g, ($($x,)*)> {
+        impl<'g: 'b, 'b, $($x: Borrow<'b>,)*> QueryBorrow<'b, 'g, ($($x,)*)> {
             pub fn iter(&'b mut self) -> QueryIter<'b, ($($x,)*), ($(EitherIter<'b, <$x as Borrow<'b>>::Of>,)*)> {
                 QueryIter::<'b, ($($x,)*), ($(EitherIter<'b, <$x as Borrow<'b>>::Of>,)*)>::from_borrows(self)
+            }
+        }
+
+        impl<'g: 'b, 'b, $($x: Borrow<'b>,)*> IntoIterator for &'b mut QueryBorrow<'b, 'g, ($($x,)*)> {
+            type Item = ($($x,)*);
+            type IntoIter = QueryIter<'b, Self::Item, ($(EitherIter<'b, $x::Of>,)*)>;
+
+            fn into_iter(self) -> QueryIter<'b, Self::Item, ($(EitherIter<'b, $x::Of>,)*)> {
+                QueryBorrow::<'b, 'g, ($($x,)*)>::iter(self)
             }
         }
 
@@ -65,7 +75,7 @@ pub struct QueryIter<'a, T: QueryInfos, U: Iters<'a, T>> {
 
 impl<'a, T: QueryInfos, U: Iters<'a, T>> QueryIter<'a, T, U> {
     pub fn from_borrows<'guard: 'a>(
-        borrows: &'a mut QueryBorrow<'guard, T>,
+        borrows: &'a mut QueryBorrow<'a, 'guard, T>,
     ) -> QueryIter<'a, T, U> {
         let iters = <U as Iters<'a, T>>::iter_from_guards(&mut borrows.lock_guards);
         QueryIter {
@@ -154,21 +164,23 @@ mod tests {
     use world::Archetype;
 
     #[test]
-    fn testttt() {
+    fn iterator() {
         let mut archetype = Archetype::new::<(u32, u64)>();
         archetype.add((10_u32, 12_u64)).unwrap();
         archetype.add((15_u32, 14_u64)).unwrap();
         archetype.add((20_u32, 16_u64)).unwrap();
 
-        let mut query_borrow = QueryBorrow::<'_, (&mut u32, &u64)> {
+        let mut query_borrow = QueryBorrow::<'_, '_, (&mut u32, &u64)> {
             lock_guards: vec![
                 RwLockEitherGuard::WriteGuard(archetype.data.get_mut::<Vec<u32>>().unwrap().guard),
                 RwLockEitherGuard::ReadGuard(archetype.data.get::<Vec<u64>>().unwrap().guard),
             ],
             phantom: PhantomData,
+            phantom2: PhantomData,
         };
 
-        for (n, (left, right)) in query_borrow.iter().enumerate() {
+        let mut n = 0;
+        for (left, right) in &mut query_borrow {
             println!("{:?}, {:?}", left, right);
 
             if n == 0 {
@@ -181,28 +193,67 @@ mod tests {
                 assert!(*left == 20);
                 assert!(*right == 16);
             } else {
-                panic!("awd");
+                unreachable!();
             }
+
+            n += 1;
         }
     }
 
     #[test]
-    fn testttttttt() {
+    fn into_iter() {
         let mut archetype = Archetype::new::<(u32, u64)>();
         archetype.add((10_u32, 12_u64)).unwrap();
         archetype.add((15_u32, 14_u64)).unwrap();
         archetype.add((20_u32, 16_u64)).unwrap();
 
-        let mut query_borrow = QueryBorrow::<'_, (&mut u32,)> {
+        let mut query_borrow = QueryBorrow::<'_, '_, (&mut u32, &u64)> {
+            lock_guards: vec![
+                RwLockEitherGuard::WriteGuard(archetype.data.get_mut::<Vec<u32>>().unwrap().guard),
+                RwLockEitherGuard::ReadGuard(archetype.data.get::<Vec<u64>>().unwrap().guard),
+            ],
+            phantom: PhantomData,
+            phantom2: PhantomData,
+        };
+
+        let mut n = 0;
+        for (left, right) in &mut query_borrow {
+            println!("{:?}, {:?}", left, right);
+
+            if n == 0 {
+                assert!(*left == 10);
+                assert!(*right == 12);
+            } else if n == 1 {
+                assert!(*left == 15);
+                assert!(*right == 14);
+            } else if n == 2 {
+                assert!(*left == 20);
+                assert!(*right == 16);
+            } else {
+                unreachable!();
+            }
+
+            n += 1;
+        }
+    }
+
+    #[test]
+    fn subset_iter() {
+        let mut archetype = Archetype::new::<(u32, u64)>();
+        archetype.add((10_u32, 12_u64)).unwrap();
+        archetype.add((15_u32, 14_u64)).unwrap();
+        archetype.add((20_u32, 16_u64)).unwrap();
+
+        let mut query_borrow = QueryBorrow::<'_, '_, (&mut u32,)> {
             lock_guards: vec![RwLockEitherGuard::WriteGuard(
                 archetype.data.get_mut::<Vec<u32>>().unwrap().guard,
             )],
             phantom: PhantomData,
+            phantom2: PhantomData,
         };
 
-        let query_iter = QueryIter::<'_, _, (EitherIter<_>,)>::from_borrows(&mut query_borrow);
-
-        for (n, (left,)) in query_iter.enumerate() {
+        let mut n = 0;
+        for (left,) in &mut query_borrow {
             println!("{:?}", left);
 
             if n == 0 {
@@ -212,8 +263,10 @@ mod tests {
             } else if n == 2 {
                 assert!(*left == 20);
             } else {
-                panic!("awd");
+                unreachable!();
             }
+
+            n += 1;
         }
     }
 }
