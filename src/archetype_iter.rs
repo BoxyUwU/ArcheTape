@@ -24,7 +24,11 @@ macro_rules! impl_query_infos {
     ($($x:ident)*) => {
         impl<'b, $($x: Borrow<'b>,)*> QueryInfos for ($($x,)*) { }
 
-        impl<'g: 'b, 'b, $($x: Borrow<'b>,)*> QueryBorrow<'g, ($($x,)*)> { }
+        impl<'g: 'b, 'b, $($x: Borrow<'b>,)*> QueryBorrow<'g, ($($x,)*)> {
+            pub fn iter(&'b mut self) -> QueryIter<'b, ($($x,)*), ($(EitherIter<'b, <$x as Borrow<'b>>::Of>,)*)> {
+                QueryIter::<'b, ($($x,)*), ($(EitherIter<'b, <$x as Borrow<'b>>::Of>,)*)>::from_borrows(self)
+            }
+        }
 
         impl<'a, $($x: Borrow<'a>,)*> Iters<'a, ($($x,)*)> for ($(EitherIter<'a, $x::Of>,)*) {
             fn iter_from_guards<'guard: 'a>(locks: &'a mut Vec<RwLockEitherGuard<'guard>>) -> ($(EitherIter<'a, $x::Of>,)*) {
@@ -164,10 +168,7 @@ mod tests {
             phantom: PhantomData,
         };
 
-        let query_iter =
-            QueryIter::<'_, _, (EitherIter<_>, EitherIter<_>)>::from_borrows(&mut query_borrow);
-
-        for (n, (left, right)) in query_iter.enumerate() {
+        for (n, (left, right)) in query_borrow.iter().enumerate() {
             println!("{:?}, {:?}", left, right);
 
             if n == 0 {
