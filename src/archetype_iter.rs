@@ -27,7 +27,7 @@ macro_rules! impl_query_infos {
 
         impl<'g: 'b, 'b, $($x: Borrow<'b>,)*> QueryBorrow<'b, 'g, ($($x,)*)> {
             pub fn iter(&'b mut self) -> QueryIter<'b, ($($x,)*), ($(EitherIter<'b, <$x as Borrow<'b>>::Of>,)*)> {
-                QueryIter::<'b, ($($x,)*), ($(EitherIter<'b, <$x as Borrow<'b>>::Of>,)*)>::from_borrows(self)
+                QueryIter::<'b, ($($x,)*), ($(EitherIter<'b, <$x as Borrow<'b>>::Of>,)*)>::from_borrow(self)
             }
         }
 
@@ -69,15 +69,31 @@ pub trait Iters<'a, T: QueryInfos> {
 }
 
 pub struct QueryIter<'a, T: QueryInfos, U: Iters<'a, T>> {
-    iters: U,
+    iters: Vec<U>,
     phantom: PhantomData<&'a T>,
 }
 
 impl<'a, T: QueryInfos, U: Iters<'a, T>> QueryIter<'a, T, U> {
-    pub fn from_borrows<'guard: 'a>(
+    pub fn from_borrow<'guard: 'a>(
         borrows: &'a mut QueryBorrow<'a, 'guard, T>,
     ) -> QueryIter<'a, T, U> {
         let iters = <U as Iters<'a, T>>::iter_from_guards(&mut borrows.lock_guards);
+        QueryIter {
+            iters: vec![iters],
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn from_multiple_borrows<'guard: 'a>(
+        borrows: Vec<&'a mut QueryBorrow<'a, 'guard, T>>,
+    ) -> QueryIter<'a, T, U> {
+        let mut iters = vec![];
+        for borrow in borrows.into_iter() {
+            iters.push(<U as Iters<'a, T>>::iter_from_guards(
+                &mut borrow.lock_guards,
+            ))
+        }
+
         QueryIter {
             iters,
             phantom: PhantomData,
@@ -89,7 +105,13 @@ impl<'a, T: QueryInfos, U: Iters<'a, T>> Iterator for QueryIter<'a, T, U> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iters.next()
+        while let Some(iter) = self.iters.last_mut() {
+            match iter.next() {
+                Some(item) => return Some(item),
+                None => self.iters.pop(),
+            };
+        }
+        None
     }
 }
 
@@ -261,6 +283,63 @@ mod tests {
             } else if n == 1 {
                 assert!(*left == 15);
             } else if n == 2 {
+                assert!(*left == 20);
+            } else {
+                unreachable!();
+            }
+
+            n += 1;
+        }
+    }
+
+    #[test]
+    fn multi_archetype_iter() {
+        let mut archetype = Archetype::new::<(u32, u64)>();
+        archetype.add((10_u32, 12_u64)).unwrap();
+        archetype.add((15_u32, 14_u64)).unwrap();
+        archetype.add((20_u32, 16_u64)).unwrap();
+
+        let mut archetype2 = Archetype::new::<(u32, u64, u128)>();
+        archetype2.add((11_u32, 12_u64, 99_u128)).unwrap();
+        archetype2.add((16_u32, 14_u64, 99_u128)).unwrap();
+        archetype2.add((21_u32, 16_u64, 99_u128)).unwrap();
+
+        let mut query_borrow = QueryBorrow::<'_, '_, (&mut u32,)> {
+            lock_guards: vec![RwLockEitherGuard::WriteGuard(
+                archetype.data.get_mut::<Vec<u32>>().unwrap().guard,
+            )],
+            phantom: PhantomData,
+            phantom2: PhantomData,
+        };
+
+        let mut query_borrow2 = QueryBorrow::<'_, '_, (&mut u32,)> {
+            lock_guards: vec![RwLockEitherGuard::WriteGuard(
+                archetype2.data.get_mut::<Vec<u32>>().unwrap().guard,
+            )],
+            phantom: PhantomData,
+            phantom2: PhantomData,
+        };
+
+        let iter = QueryIter::<'_, _, (EitherIter<_>,)>::from_multiple_borrows(vec![
+            &mut query_borrow,
+            &mut query_borrow2,
+        ]);
+
+        let mut n = 0;
+        for (left,) in iter {
+            println!("{:?}", left);
+
+            if n == 0 {
+                assert!(*left == 11);
+            } else if n == 1 {
+                assert!(*left == 16);
+            } else if n == 2 {
+                assert!(*left == 21);
+            } else if n == 3 {
+                assert!(*left == 10);
+            } else if n == 4 {
+                assert!(*left == 15);
+            } else if n == 5 {
                 assert!(*left == 20);
             } else {
                 unreachable!();
