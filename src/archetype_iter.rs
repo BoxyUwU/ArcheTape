@@ -203,8 +203,6 @@ mod tests {
 
         let mut n = 0;
         for (left, right) in &mut query_borrow {
-            println!("{:?}, {:?}", left, right);
-
             if n == 0 {
                 assert!(*left == 10);
                 assert!(*right == 12);
@@ -240,8 +238,6 @@ mod tests {
 
         let mut n = 0;
         for (left, right) in &mut query_borrow {
-            println!("{:?}, {:?}", left, right);
-
             if n == 0 {
                 assert!(*left == 10);
                 assert!(*right == 12);
@@ -276,8 +272,6 @@ mod tests {
 
         let mut n = 0;
         for (left,) in &mut query_borrow {
-            println!("{:?}", left);
-
             if n == 0 {
                 assert!(*left == 10);
             } else if n == 1 {
@@ -327,8 +321,6 @@ mod tests {
 
         let mut n = 0;
         for (left,) in iter {
-            println!("{:?}", left);
-
             if n == 0 {
                 assert!(*left == 11);
             } else if n == 1 {
