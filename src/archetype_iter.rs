@@ -111,6 +111,7 @@ macro_rules! impl_query_infos {
             }
 
             #[allow(non_snake_case)]
+            #[inline(always)]
             fn next(&mut self) -> Option<($($x,)*)> {
                 let ($($x,)*) = self;
 
@@ -136,7 +137,6 @@ pub trait Iters<'a, T: QueryInfos> {
 
 pub struct QueryIter<'a, T: QueryInfos, U: Iters<'a, T>> {
     iters: Vec<U>,
-    cur_iter: Option<U>,
     phantom: PhantomData<&'a T>,
 }
 
@@ -152,11 +152,8 @@ impl<'a, T: QueryInfos, U: Iters<'a, T>> QueryIter<'a, T, U> {
             iters.push(<U as Iters<'a, T>>::iter_from_guards(chunk));
         }
 
-        let cur_iter = iters.pop();
-
         QueryIter {
             iters,
-            cur_iter,
             phantom: PhantomData,
         }
     }
@@ -165,12 +162,14 @@ impl<'a, T: QueryInfos, U: Iters<'a, T>> QueryIter<'a, T, U> {
 impl<'a, T: QueryInfos, U: Iters<'a, T>> Iterator for QueryIter<'a, T, U> {
     type Item = T;
 
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            match self.cur_iter.as_mut()?.next() {
+            let iter = self.iters.last_mut()?;
+            match iter.next() {
                 Some(item) => return Some(item),
-                None => self.cur_iter = self.iters.pop(),
-            }
+                None => self.iters.pop(),
+            };
         }
     }
 }
@@ -232,6 +231,7 @@ impl<'b, T: 'static> Borrow<'b> for &'b mut T {
         }
     }
 
+    #[inline(always)]
     fn borrow_from_iter<'a>(iter: &'a mut EitherIter<'b, Self::Of>) -> Option<Self> {
         match iter {
             EitherIter::Mut(iter) => iter.next(),
@@ -277,6 +277,7 @@ mod tests {
         for (left, right) in &mut query.borrow() {
             assert_eq!((*left, *right), checks.next().unwrap());
         }
+        assert!(checks.next().is_none());
     }
 
     #[test]
@@ -293,6 +294,7 @@ mod tests {
         for (left,) in &mut query.borrow() {
             assert_eq!(*left, checks.next().unwrap());
         }
+        assert!(checks.next().is_none());
     }
 
     #[test]
@@ -313,5 +315,6 @@ mod tests {
         for (left,) in &mut query.borrow() {
             assert_eq!(*left, checks.next().unwrap());
         }
+        assert!(checks.next().is_none());
     }
 }

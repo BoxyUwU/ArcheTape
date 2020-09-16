@@ -71,21 +71,23 @@ pub mod simple_iter {
 
         pub fn run(&mut self) {
             let query = self.0.query::<(&mut Position, &Velocity)>();
-            for (position, velocity) in &mut query.borrow() {
-                position.0 += velocity.0;
-            }
+            (&mut query.borrow())
+                .iter()
+                .for_each(|(position, velocity)| {
+                    position.0 += velocity.0;
+                });
         }
     }
 }
 
 pub fn ellecs(c: &mut Criterion) {
     let mut group = c.benchmark_group("ellecs");
-    group.bench_function("frag_iter", |b| {
-        let mut bench = frag_iter::Benchmark::new();
-        b.iter(move || bench.run());
-    });
     group.bench_function("simple_iter", |b| {
         let mut bench = simple_iter::Benchmark::new();
+        b.iter(move || bench.run());
+    });
+    group.bench_function("frag_iter", |b| {
+        let mut bench = frag_iter::Benchmark::new();
         b.iter(move || bench.run());
     });
 }
