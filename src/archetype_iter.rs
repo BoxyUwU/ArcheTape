@@ -118,6 +118,12 @@ macro_rules! impl_query_infos {
                     <$x as Borrow<'a>>::borrow_from_iter($x)?,
                 )*))
             }
+
+            fn new_empty() -> Self {
+                ($(
+                    <$x as Borrow<'a>>::either_iter_empty(),
+                )*)
+            }
         }
     };
 }
@@ -125,10 +131,12 @@ macro_rules! impl_query_infos {
 pub trait Iters<'a, T: QueryInfos> {
     fn iter_from_guards<'guard: 'a>(locks: &'a mut [RwLockEitherGuard<'guard>]) -> Self;
     fn next(&mut self) -> Option<T>;
+    fn new_empty() -> Self;
 }
 
 pub struct QueryIter<'a, T: QueryInfos, U: Iters<'a, T>> {
     iters: Vec<U>,
+    cur_iter: Option<U>,
     phantom: PhantomData<&'a T>,
 }
 
@@ -144,8 +152,11 @@ impl<'a, T: QueryInfos, U: Iters<'a, T>> QueryIter<'a, T, U> {
             iters.push(<U as Iters<'a, T>>::iter_from_guards(chunk));
         }
 
+        let cur_iter = iters.pop();
+
         QueryIter {
             iters,
+            cur_iter,
             phantom: PhantomData,
         }
     }
@@ -155,13 +166,12 @@ impl<'a, T: QueryInfos, U: Iters<'a, T>> Iterator for QueryIter<'a, T, U> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(iter) = self.iters.last_mut() {
-            match iter.next() {
+        loop {
+            match self.cur_iter.as_mut()?.next() {
                 Some(item) => return Some(item),
-                None => self.iters.pop(),
-            };
+                None => self.cur_iter = self.iters.pop(),
+            }
         }
-        None
     }
 }
 
@@ -175,6 +185,8 @@ pub trait Borrow<'b>: Sized {
     fn borrow_from_iter<'a>(iter: &'a mut EitherIter<'b, Self::Of>) -> Option<Self>;
 
     fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard>;
+
+    fn either_iter_empty<'a>() -> EitherIter<'a, Self::Of>;
 }
 
 impl<'b, T: 'static> Borrow<'b> for &'b T {
@@ -201,6 +213,10 @@ impl<'b, T: 'static> Borrow<'b> for &'b T {
     fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard> {
         RwLockEitherGuard::ReadGuard(archetype.data.get::<Vec<T>>().unwrap().guard)
     }
+
+    fn either_iter_empty<'a>() -> EitherIter<'a, Self::Of> {
+        EitherIter::Immut([].iter())
+    }
 }
 impl<'b, T: 'static> Borrow<'b> for &'b mut T {
     type Of = T;
@@ -226,6 +242,10 @@ impl<'b, T: 'static> Borrow<'b> for &'b mut T {
     fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard> {
         RwLockEitherGuard::WriteGuard(archetype.data.get_mut::<Vec<T>>().unwrap().guard)
     }
+
+    fn either_iter_empty<'a>() -> EitherIter<'a, Self::Of> {
+        EitherIter::Mut([].iter_mut())
+    }
 }
 
 impl_query_infos!(A B C D E F G H I J);
@@ -241,181 +261,57 @@ impl_query_infos!(A);
 
 #[cfg(test)]
 mod tests {
-    use super::super::*;
     use super::*;
-    use world::Archetype;
-
-    #[test]
-    fn api() {
-        let mut world = World::new();
-        world.spawn((10_u32, 12_u64));
-        world.spawn((15_u32, 14_u64));
-        world.spawn((20_u32, 16_u64));
-        world.spawn((11_u32, 13_u64, true));
-        world.spawn((16_u32, 15_u64, true));
-        world.spawn((21_u32, 17_u64, true));
-
-        assert!(world.archetypes.len() == 2);
-
-        let query = world.query::<(&mut u32, &mut u64)>();
-
-        let mut checks = vec![
-            (11_u32, 13_u64),
-            (16, 15),
-            (21, 17),
-            (10, 12),
-            (15, 14),
-            (20, 16),
-        ]
-        .into_iter();
-
-        for (&mut left, &mut right) in &mut query.borrow() {
-            assert!((left, right) == checks.next().unwrap());
-        }
-    }
 
     #[test]
     fn iterator() {
-        let mut archetype = Archetype::new::<(u32, u64)>();
-        archetype.add((10_u32, 12_u64)).unwrap();
-        archetype.add((15_u32, 14_u64)).unwrap();
-        archetype.add((20_u32, 16_u64)).unwrap();
+        let mut world = World::new();
 
-        let mut query_borrow = QueryBorrow::<'_, '_, (&mut u32, &u64)> {
-            lock_guards: vec![
-                RwLockEitherGuard::WriteGuard(archetype.data.get_mut::<Vec<u32>>().unwrap().guard),
-                RwLockEitherGuard::ReadGuard(archetype.data.get::<Vec<u64>>().unwrap().guard),
-            ],
-            phantom: PhantomData,
-            phantom2: PhantomData,
-        };
+        world.spawn((10_u32, 12_u64));
+        world.spawn((15_u32, 14_u64));
+        world.spawn((20_u32, 16_u64));
 
-        let mut n = 0;
-        for (left, right) in &mut query_borrow {
-            if n == 0 {
-                assert!(*left == 10);
-                assert!(*right == 12);
-            } else if n == 1 {
-                assert!(*left == 15);
-                assert!(*right == 14);
-            } else if n == 2 {
-                assert!(*left == 20);
-                assert!(*right == 16);
-            } else {
-                unreachable!();
-            }
+        let query = world.query::<(&mut u32, &u64)>();
 
-            n += 1;
+        let mut checks = vec![(10, 12), (15, 14), (20, 16)].into_iter();
+        for (left, right) in &mut query.borrow() {
+            assert_eq!((*left, *right), checks.next().unwrap());
         }
     }
 
     #[test]
-    fn into_iter() {
-        let mut archetype = Archetype::new::<(u32, u64)>();
-        archetype.add((10_u32, 12_u64)).unwrap();
-        archetype.add((15_u32, 14_u64)).unwrap();
-        archetype.add((20_u32, 16_u64)).unwrap();
+    fn subset_iterator() {
+        let mut world = World::new();
 
-        let mut query_borrow = QueryBorrow::<'_, '_, (&mut u32, &u64)> {
-            lock_guards: vec![
-                RwLockEitherGuard::WriteGuard(archetype.data.get_mut::<Vec<u32>>().unwrap().guard),
-                RwLockEitherGuard::ReadGuard(archetype.data.get::<Vec<u64>>().unwrap().guard),
-            ],
-            phantom: PhantomData,
-            phantom2: PhantomData,
-        };
+        world.spawn((10_u32, 12_u64));
+        world.spawn((15_u32, 14_u64));
+        world.spawn((20_u32, 16_u64));
 
-        let mut n = 0;
-        for (left, right) in &mut query_borrow {
-            if n == 0 {
-                assert!(*left == 10);
-                assert!(*right == 12);
-            } else if n == 1 {
-                assert!(*left == 15);
-                assert!(*right == 14);
-            } else if n == 2 {
-                assert!(*left == 20);
-                assert!(*right == 16);
-            } else {
-                unreachable!();
-            }
+        let query = world.query::<(&mut u32,)>();
 
-            n += 1;
+        let mut checks = vec![10, 15, 20].into_iter();
+        for (left,) in &mut query.borrow() {
+            assert_eq!(*left, checks.next().unwrap());
         }
     }
 
     #[test]
-    fn subset_iter() {
-        let mut archetype = Archetype::new::<(u32, u64)>();
-        archetype.add((10_u32, 12_u64)).unwrap();
-        archetype.add((15_u32, 14_u64)).unwrap();
-        archetype.add((20_u32, 16_u64)).unwrap();
+    fn multi_archetype_iterator() {
+        let mut world = World::new();
 
-        let mut query_borrow = QueryBorrow::<'_, '_, (&mut u32,)> {
-            lock_guards: vec![RwLockEitherGuard::WriteGuard(
-                archetype.data.get_mut::<Vec<u32>>().unwrap().guard,
-            )],
-            phantom: PhantomData,
-            phantom2: PhantomData,
-        };
+        world.spawn((10_u32, 12_u64));
+        world.spawn((15_u32, 14_u64));
+        world.spawn((20_u32, 16_u64));
 
-        let mut n = 0;
-        for (left,) in &mut query_borrow {
-            if n == 0 {
-                assert!(*left == 10);
-            } else if n == 1 {
-                assert!(*left == 15);
-            } else if n == 2 {
-                assert!(*left == 20);
-            } else {
-                unreachable!();
-            }
+        world.spawn((11_u32, 12_u64, 99_u128));
+        world.spawn((16_u32, 14_u64, 99_u128));
+        world.spawn((21_u32, 16_u64, 99_u128));
 
-            n += 1;
-        }
-    }
+        let query = world.query::<(&mut u32,)>();
 
-    #[test]
-    fn multi_archetype_iter() {
-        let mut archetype = Archetype::new::<(u32, u64)>();
-        archetype.add((10_u32, 12_u64)).unwrap();
-        archetype.add((15_u32, 14_u64)).unwrap();
-        archetype.add((20_u32, 16_u64)).unwrap();
-
-        let mut archetype2 = Archetype::new::<(u32, u64, u128)>();
-        archetype2.add((11_u32, 12_u64, 99_u128)).unwrap();
-        archetype2.add((16_u32, 14_u64, 99_u128)).unwrap();
-        archetype2.add((21_u32, 16_u64, 99_u128)).unwrap();
-
-        let mut query_borrow = QueryBorrow::<'_, '_, (&mut u32,)> {
-            lock_guards: vec![
-                RwLockEitherGuard::WriteGuard(archetype.data.get_mut::<Vec<u32>>().unwrap().guard),
-                RwLockEitherGuard::WriteGuard(archetype2.data.get_mut::<Vec<u32>>().unwrap().guard),
-            ],
-            phantom: PhantomData,
-            phantom2: PhantomData,
-        };
-
-        let iter = query_borrow.into_iter();
-        let mut n = 0;
-        for (left,) in iter {
-            if n == 0 {
-                assert!(*left == 11);
-            } else if n == 1 {
-                assert!(*left == 16);
-            } else if n == 2 {
-                assert!(*left == 21);
-            } else if n == 3 {
-                assert!(*left == 10);
-            } else if n == 4 {
-                assert!(*left == 15);
-            } else if n == 5 {
-                assert!(*left == 20);
-            } else {
-                unreachable!();
-            }
-
-            n += 1;
+        let mut checks = vec![11, 16, 21, 10, 15, 20].into_iter();
+        for (left,) in &mut query.borrow() {
+            assert_eq!(*left, checks.next().unwrap());
         }
     }
 }
