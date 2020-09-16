@@ -1,4 +1,5 @@
 use super::anymap::{AnyMap, AnyMapBorrow, AnyMapBorrowMut};
+use super::archetype_iter::{Query, QueryInfos};
 use super::bundle::Bundle;
 use super::lifetime_anymap::{LifetimeAnyMap, LifetimeAnyMapBorrow, LifetimeAnyMapBorrowMut};
 use std::any::TypeId;
@@ -20,7 +21,7 @@ impl Archetype {
 }
 
 pub struct World {
-    archetypes: Vec<Archetype>,
+    pub(crate) archetypes: Vec<Archetype>,
     owned_resources: AnyMap,
 }
 
@@ -30,6 +31,10 @@ impl World {
             archetypes: Vec::new(),
             owned_resources: AnyMap::new(),
         }
+    }
+
+    pub fn query<T: QueryInfos>(&self) -> Query<T> {
+        Query::<T>::new(self)
     }
 
     pub fn find_archetype<T: Bundle>(&self) -> Option<usize> {
@@ -45,6 +50,28 @@ impl World {
             self.archetypes.push(T::new_archetype());
             self.archetypes.len() - 1
         })
+    }
+
+    pub fn query_archetypes<T: QueryInfos>(&self) -> Vec<usize> {
+        self.archetypes
+            .iter()
+            .enumerate()
+            .filter(|(_, archetype)| {
+                T::type_ids()
+                    .iter()
+                    .all(|id| archetype.type_ids.contains(id))
+            })
+            .map(|(n, _)| n)
+            .collect()
+    }
+
+    pub fn spawn<T: Bundle>(&mut self, bundle: T) {
+        let archetype_idx = self.find_archetype_or_insert::<T>();
+        self.archetypes
+            .get_mut(archetype_idx)
+            .unwrap()
+            .add(bundle)
+            .unwrap();
     }
 
     pub fn run(&mut self) -> RunWorldContext {

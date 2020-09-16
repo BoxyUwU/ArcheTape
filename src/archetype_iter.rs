@@ -1,5 +1,5 @@
-use super::world::World;
-use std::any::Any;
+use super::world::{Archetype, World};
+use std::any::{Any, TypeId};
 use std::marker::PhantomData;
 use std::slice::{Iter, IterMut};
 use std::sync::{RwLockReadGuard, RwLockWriteGuard};
@@ -14,9 +14,38 @@ pub enum RwLockEitherGuard<'a> {
     ReadGuard(RwLockReadGuard<'a, Box<dyn Any>>),
 }
 
-pub struct Query<'a, T: QueryInfos> {
+pub struct Query<'a, T: QueryInfos + 'a> {
     world: &'a World,
     phantom: PhantomData<T>,
+}
+
+impl<'a, T: QueryInfos + 'a> Query<'a, T> {
+    pub fn new(world: &'a World) -> Self {
+        Self {
+            world,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn borrow(&self) -> QueryBorrow<'_, '_, T> {
+        let archetypes = self.world.query_archetypes::<T>();
+        let mut guards = vec![];
+
+        for archetype in archetypes
+            .into_iter()
+            .map(|idx| self.world.archetypes.get(idx).unwrap())
+        {
+            for guard in T::borrow_guards(archetype).into_iter() {
+                guards.push(guard)
+            }
+        }
+
+        QueryBorrow {
+            lock_guards: guards,
+            phantom: PhantomData,
+            phantom2: PhantomData,
+        }
+    }
 }
 
 pub struct QueryBorrow<'b, 'guard, T: QueryInfos + 'b> {
@@ -27,6 +56,8 @@ pub struct QueryBorrow<'b, 'guard, T: QueryInfos + 'b> {
 
 pub trait QueryInfos {
     fn arity() -> usize;
+    fn type_ids() -> Vec<TypeId>;
+    fn borrow_guards<'guard>(archetype: &'guard Archetype) -> Vec<RwLockEitherGuard<'guard>>;
 }
 
 macro_rules! impl_query_infos {
@@ -40,6 +71,16 @@ macro_rules! impl_query_infos {
                     count += 1;
                 )*
                 count
+            }
+
+            fn type_ids() -> Vec<TypeId> {
+                vec![$(TypeId::of::<$x::Of>(),)*]
+            }
+
+            fn borrow_guards<'guard>(archetype: &'guard Archetype) -> Vec<RwLockEitherGuard<'guard>> {
+                vec![$(
+                    $x::guards_from_archetype(archetype),
+                )*]
             }
         }
 
@@ -125,13 +166,15 @@ impl<'a, T: QueryInfos, U: Iters<'a, T>> Iterator for QueryIter<'a, T, U> {
 }
 
 pub trait Borrow<'b>: Sized {
-    type Of;
+    type Of: 'static;
 
     fn either_iter_from_guard<'a, 'guard: 'a>(
         guard: &'a mut RwLockEitherGuard<'guard>,
     ) -> EitherIter<'a, Self::Of>;
 
     fn borrow_from_iter<'a>(iter: &'a mut EitherIter<'b, Self::Of>) -> Option<Self>;
+
+    fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard>;
 }
 
 impl<'b, T: 'static> Borrow<'b> for &'b T {
@@ -154,6 +197,10 @@ impl<'b, T: 'static> Borrow<'b> for &'b T {
             _ => unreachable!(),
         }
     }
+
+    fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard> {
+        RwLockEitherGuard::ReadGuard(archetype.data.get::<Vec<T>>().unwrap().guard)
+    }
 }
 impl<'b, T: 'static> Borrow<'b> for &'b mut T {
     type Of = T;
@@ -174,6 +221,10 @@ impl<'b, T: 'static> Borrow<'b> for &'b mut T {
             EitherIter::Mut(iter) => iter.next(),
             _ => unreachable!(),
         }
+    }
+
+    fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard> {
+        RwLockEitherGuard::WriteGuard(archetype.data.get_mut::<Vec<T>>().unwrap().guard)
     }
 }
 
@@ -196,13 +247,31 @@ mod tests {
 
     #[test]
     fn api() {
-        /*let mut world = World::new();
+        let mut world = World::new();
         world.spawn((10_u32, 12_u64));
         world.spawn((15_u32, 14_u64));
         world.spawn((20_u32, 16_u64));
         world.spawn((11_u32, 13_u64, true));
         world.spawn((16_u32, 15_u64, true));
-        world.spawn((21_u32, 17_u64, true));*/
+        world.spawn((21_u32, 17_u64, true));
+
+        assert!(world.archetypes.len() == 2);
+
+        let query = world.query::<(&mut u32, &mut u64)>();
+
+        let mut checks = vec![
+            (11_u32, 13_u64),
+            (16, 15),
+            (21, 17),
+            (10, 12),
+            (15, 14),
+            (20, 16),
+        ]
+        .into_iter();
+
+        for (&mut left, &mut right) in &mut query.borrow() {
+            assert!((left, right) == checks.next().unwrap());
+        }
     }
 
     #[test]
@@ -327,8 +396,7 @@ mod tests {
             phantom2: PhantomData,
         };
 
-        let iter = QueryIter::<'_, _, (EitherIter<_>,)>::from_borrow(&mut query_borrow);
-
+        let iter = query_borrow.into_iter();
         let mut n = 0;
         for (left,) in iter {
             if n == 0 {
