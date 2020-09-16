@@ -1,3 +1,4 @@
+use super::world::World;
 use std::any::Any;
 use std::marker::PhantomData;
 use std::slice::{Iter, IterMut};
@@ -13,21 +14,38 @@ pub enum RwLockEitherGuard<'a> {
     ReadGuard(RwLockReadGuard<'a, Box<dyn Any>>),
 }
 
+pub struct Query<'a, T: QueryInfos> {
+    world: &'a World,
+    phantom: PhantomData<T>,
+}
+
 pub struct QueryBorrow<'b, 'guard, T: QueryInfos + 'b> {
     lock_guards: Vec<RwLockEitherGuard<'guard>>,
     phantom: PhantomData<T>,
     phantom2: PhantomData<&'b ()>,
 }
 
-pub trait QueryInfos {}
+pub trait QueryInfos {
+    fn arity() -> usize;
+}
 
 macro_rules! impl_query_infos {
     ($($x:ident)*) => {
-        impl<'b, $($x: Borrow<'b>,)*> QueryInfos for ($($x,)*) { }
+        impl<'b, $($x: Borrow<'b>,)*> QueryInfos for ($($x,)*) {
+            #[allow(unused, non_snake_case)]
+            fn arity() -> usize {
+                let mut count = 0;
+                $(
+                    let $x = ();
+                    count += 1;
+                )*
+                count
+            }
+        }
 
         impl<'g: 'b, 'b, $($x: Borrow<'b>,)*> QueryBorrow<'b, 'g, ($($x,)*)> {
-            pub fn iter(&'b mut self) -> QueryIter<'b, ($($x,)*), ($(EitherIter<'b, <$x as Borrow<'b>>::Of>,)*)> {
-                QueryIter::<'b, ($($x,)*), ($(EitherIter<'b, <$x as Borrow<'b>>::Of>,)*)>::from_borrow(self)
+            pub fn iter(&'b mut self) -> QueryIter<'b, ($($x,)*), ($(EitherIter<'b, $x::Of>,)*)> {
+                QueryIter::<'b, ($($x,)*), ($(EitherIter<'b, $x::Of>,)*)>::from_borrow(self)
             }
         }
 
@@ -41,7 +59,7 @@ macro_rules! impl_query_infos {
         }
 
         impl<'a, $($x: Borrow<'a>,)*> Iters<'a, ($($x,)*)> for ($(EitherIter<'a, $x::Of>,)*) {
-            fn iter_from_guards<'guard: 'a>(locks: &'a mut Vec<RwLockEitherGuard<'guard>>) -> ($(EitherIter<'a, $x::Of>,)*) {
+            fn iter_from_guards<'guard: 'a>(locks: &'a mut [RwLockEitherGuard<'guard>]) -> ($(EitherIter<'a, $x::Of>,)*) {
                 let mut iter = locks.iter_mut();
                 ($(
                     {
@@ -64,7 +82,7 @@ macro_rules! impl_query_infos {
 }
 
 pub trait Iters<'a, T: QueryInfos> {
-    fn iter_from_guards<'guard: 'a>(locks: &'a mut Vec<RwLockEitherGuard<'guard>>) -> Self;
+    fn iter_from_guards<'guard: 'a>(locks: &'a mut [RwLockEitherGuard<'guard>]) -> Self;
     fn next(&mut self) -> Option<T>;
 }
 
@@ -77,21 +95,12 @@ impl<'a, T: QueryInfos, U: Iters<'a, T>> QueryIter<'a, T, U> {
     pub fn from_borrow<'guard: 'a>(
         borrows: &'a mut QueryBorrow<'a, 'guard, T>,
     ) -> QueryIter<'a, T, U> {
-        let iters = <U as Iters<'a, T>>::iter_from_guards(&mut borrows.lock_guards);
-        QueryIter {
-            iters: vec![iters],
-            phantom: PhantomData,
-        }
-    }
-
-    pub fn from_multiple_borrows<'guard: 'a>(
-        borrows: Vec<&'a mut QueryBorrow<'a, 'guard, T>>,
-    ) -> QueryIter<'a, T, U> {
         let mut iters = vec![];
-        for borrow in borrows.into_iter() {
-            iters.push(<U as Iters<'a, T>>::iter_from_guards(
-                &mut borrow.lock_guards,
-            ))
+        let arity = T::arity();
+
+        assert!(borrows.lock_guards.len() % arity == 0);
+        for chunk in borrows.lock_guards.chunks_exact_mut(arity) {
+            iters.push(<U as Iters<'a, T>>::iter_from_guards(chunk));
         }
 
         QueryIter {
@@ -184,6 +193,17 @@ mod tests {
     use super::super::*;
     use super::*;
     use world::Archetype;
+
+    #[test]
+    fn api() {
+        /*let mut world = World::new();
+        world.spawn((10_u32, 12_u64));
+        world.spawn((15_u32, 14_u64));
+        world.spawn((20_u32, 16_u64));
+        world.spawn((11_u32, 13_u64, true));
+        world.spawn((16_u32, 15_u64, true));
+        world.spawn((21_u32, 17_u64, true));*/
+    }
 
     #[test]
     fn iterator() {
@@ -299,25 +319,15 @@ mod tests {
         archetype2.add((21_u32, 16_u64, 99_u128)).unwrap();
 
         let mut query_borrow = QueryBorrow::<'_, '_, (&mut u32,)> {
-            lock_guards: vec![RwLockEitherGuard::WriteGuard(
-                archetype.data.get_mut::<Vec<u32>>().unwrap().guard,
-            )],
+            lock_guards: vec![
+                RwLockEitherGuard::WriteGuard(archetype.data.get_mut::<Vec<u32>>().unwrap().guard),
+                RwLockEitherGuard::WriteGuard(archetype2.data.get_mut::<Vec<u32>>().unwrap().guard),
+            ],
             phantom: PhantomData,
             phantom2: PhantomData,
         };
 
-        let mut query_borrow2 = QueryBorrow::<'_, '_, (&mut u32,)> {
-            lock_guards: vec![RwLockEitherGuard::WriteGuard(
-                archetype2.data.get_mut::<Vec<u32>>().unwrap().guard,
-            )],
-            phantom: PhantomData,
-            phantom2: PhantomData,
-        };
-
-        let iter = QueryIter::<'_, _, (EitherIter<_>,)>::from_multiple_borrows(vec![
-            &mut query_borrow,
-            &mut query_borrow2,
-        ]);
+        let iter = QueryIter::<'_, _, (EitherIter<_>,)>::from_borrow(&mut query_borrow);
 
         let mut n = 0;
         for (left,) in iter {
