@@ -52,7 +52,7 @@ impl World {
         })
     }
 
-    pub fn query_archetypes<T: QueryInfos>(&self) -> Vec<usize> {
+    pub fn query_archetypes<T: QueryInfos>(&self) -> impl Iterator<Item = usize> + '_ {
         self.archetypes
             .iter()
             .enumerate()
@@ -62,7 +62,6 @@ impl World {
                     .all(|id| archetype.type_ids.contains(id))
             })
             .map(|(n, _)| n)
-            .collect()
     }
 
     pub fn spawn<T: Bundle>(&mut self, bundle: T) {

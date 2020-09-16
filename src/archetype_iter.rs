@@ -14,6 +14,7 @@ pub enum RwLockEitherGuard<'a> {
     ReadGuard(RwLockReadGuard<'a, Box<dyn Any>>),
 }
 
+#[derive(Copy, Clone)]
 pub struct Query<'a, T: QueryInfos + 'a> {
     world: &'a World,
     phantom: PhantomData<T>,
@@ -29,15 +30,10 @@ impl<'a, T: QueryInfos + 'a> Query<'a, T> {
 
     pub fn borrow(&self) -> QueryBorrow<'_, '_, T> {
         let archetypes = self.world.query_archetypes::<T>();
-        let mut guards = vec![];
+        let mut guards = Vec::with_capacity(16);
 
-        for archetype in archetypes
-            .into_iter()
-            .map(|idx| self.world.archetypes.get(idx).unwrap())
-        {
-            for guard in T::borrow_guards(archetype).into_iter() {
-                guards.push(guard)
-            }
+        for archetype in archetypes.map(|idx| self.world.archetypes.get(idx).unwrap()) {
+            guards.extend(T::borrow_guards(archetype));
         }
 
         QueryBorrow {
@@ -88,6 +84,26 @@ macro_rules! impl_query_infos {
             pub fn iter(&'b mut self) -> QueryIter<'b, ($($x,)*), ($(EitherIter<'b, $x::Of>,)*)> {
                 QueryIter::<'b, ($($x,)*), ($(EitherIter<'b, $x::Of>,)*)>::from_borrow(self)
             }
+
+            pub fn for_each_mut<Func: FnMut(($($x,)*))>(&'b mut self, mut func: Func) {
+                let query_iter = self.iter();
+                for iter in query_iter.iters.into_iter() {
+                    let iter = ItersIterator::new(iter);
+                    for item in iter {
+                        func(item);
+                    }
+                }
+            }
+
+            pub fn for_each<Func: Fn(($($x,)*))>(&'b mut self, func: Func) {
+                let query_iter = self.iter();
+                for iter in query_iter.iters.into_iter() {
+                    let iter = ItersIterator::new(iter);
+                    for item in iter {
+                        func(item);
+                    }
+                }
+            }
         }
 
         impl<'g: 'b, 'b, $($x: Borrow<'b>,)*> IntoIterator for &'b mut QueryBorrow<'b, 'g, ($($x,)*)> {
@@ -102,6 +118,7 @@ macro_rules! impl_query_infos {
         impl<'a, $($x: Borrow<'a>,)*> Iters<'a, ($($x,)*)> for ($(EitherIter<'a, $x::Of>,)*) {
             fn iter_from_guards<'guard: 'a>(locks: &'a mut [RwLockEitherGuard<'guard>]) -> ($(EitherIter<'a, $x::Of>,)*) {
                 let mut iter = locks.iter_mut();
+
                 ($(
                     {
                         let guard = iter.next().unwrap();
@@ -129,6 +146,28 @@ macro_rules! impl_query_infos {
     };
 }
 
+pub struct ItersIterator<'a, U: QueryInfos, T: Iters<'a, U>> {
+    iter: T,
+    phantom: PhantomData<&'a U>,
+}
+
+impl<'a, U: QueryInfos, T: Iters<'a, U>> Iterator for ItersIterator<'a, U, T> {
+    type Item = U;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+}
+
+impl<'a, U: QueryInfos, T: Iters<'a, U>> ItersIterator<'a, U, T> {
+    pub fn new(iter: T) -> Self {
+        Self {
+            iter,
+            phantom: PhantomData,
+        }
+    }
+}
+
 pub trait Iters<'a, T: QueryInfos> {
     fn iter_from_guards<'guard: 'a>(locks: &'a mut [RwLockEitherGuard<'guard>]) -> Self;
     fn next(&mut self) -> Option<T>;
@@ -144,7 +183,7 @@ impl<'a, T: QueryInfos, U: Iters<'a, T>> QueryIter<'a, T, U> {
     pub fn from_borrow<'guard: 'a>(
         borrows: &'a mut QueryBorrow<'a, 'guard, T>,
     ) -> QueryIter<'a, T, U> {
-        let mut iters = vec![];
+        let mut iters = Vec::new();
         let arity = T::arity();
 
         assert!(borrows.lock_guards.len() % arity == 0);
@@ -165,10 +204,18 @@ impl<'a, T: QueryInfos, U: Iters<'a, T>> Iterator for QueryIter<'a, T, U> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            let iter = self.iters.last_mut()?;
-            match iter.next() {
-                Some(item) => return Some(item),
-                None => self.iters.pop(),
+            match self.iters.last_mut() {
+                Some(iter) => match iter.next() {
+                    Some(item) => return Some(item),
+                    None => {
+                        self.iters.pop();
+                        if self.iters.len() == 0 {
+                            return None;
+                        }
+                    }
+                },
+                // TODO replace this with unreachable_unchecked by dealing with the case where the iterator starts off empty
+                None => return None,
             };
         }
     }
@@ -196,16 +243,20 @@ impl<'b, T: 'static> Borrow<'b> for &'b T {
     ) -> EitherIter<'a, Self::Of> {
         match guard {
             RwLockEitherGuard::ReadGuard(guard) => {
-                EitherIter::Immut(guard.downcast_ref::<Vec<T>>().unwrap().iter())
+                let vec = guard.downcast_ref::<Vec<T>>().unwrap();
+                EitherIter::Immut(vec.iter())
             }
             _ => unreachable!(),
         }
     }
 
+    #[inline(always)]
     fn borrow_from_iter<'a>(iter: &'a mut EitherIter<'b, Self::Of>) -> Option<Self> {
         match iter {
             EitherIter::Immut(iter) => iter.next(),
-            _ => unreachable!(),
+            //_ => unreachable!(),
+            // TODO get rid of this and the unreachable in either_iter_from_guard by using Concrete types instead of EitherIter and friends
+            _ => unsafe { std::hint::unreachable_unchecked() },
         }
     }
 
@@ -225,7 +276,8 @@ impl<'b, T: 'static> Borrow<'b> for &'b mut T {
     ) -> EitherIter<'a, Self::Of> {
         match guard {
             RwLockEitherGuard::WriteGuard(guard) => {
-                EitherIter::Mut(guard.downcast_mut::<Vec<T>>().unwrap().iter_mut())
+                let vec = guard.downcast_mut::<Vec<T>>().unwrap();
+                EitherIter::Mut(vec.iter_mut())
             }
             _ => unreachable!(),
         }
@@ -235,7 +287,8 @@ impl<'b, T: 'static> Borrow<'b> for &'b mut T {
     fn borrow_from_iter<'a>(iter: &'a mut EitherIter<'b, Self::Of>) -> Option<Self> {
         match iter {
             EitherIter::Mut(iter) => iter.next(),
-            _ => unreachable!(),
+            // _ => unreachable!(),
+            _ => unsafe { std::hint::unreachable_unchecked() },
         }
     }
 
@@ -262,6 +315,22 @@ impl_query_infos!(A);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn for_each_mut() {
+        let mut world = World::new();
+
+        world.spawn((10_u32, 12_u64));
+        world.spawn((15_u32, 14_u64));
+        world.spawn((20_u32, 16_u64));
+
+        let query = world.query::<(&mut u32, &u64)>();
+        let mut checks = vec![(10, 12), (15, 14), (20, 16)].into_iter();
+        query.borrow().for_each_mut(|(left, right)| {
+            assert_eq!(checks.next().unwrap(), (*left, *right));
+        });
+        assert_eq!(checks.next(), None);
+    }
 
     #[test]
     fn iterator() {

@@ -1,9 +1,33 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::error::Error;
+use std::hash::{BuildHasher, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+#[derive(Default)]
+pub struct TypeIdHasher(u64);
+
+impl Hasher for TypeIdHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        self.0 = u64::from_ne_bytes(bytes.try_into().unwrap());
+    }
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+pub struct TypeIdHasherBuilder();
+
+impl BuildHasher for TypeIdHasherBuilder {
+    type Hasher = TypeIdHasher;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        TypeIdHasher::default()
+    }
+}
 
 pub struct AnyMapBorrow<'a, T: 'static> {
     pub guard: RwLockReadGuard<'a, Box<dyn Any>>,
@@ -56,13 +80,13 @@ impl<'a, T: 'static> DerefMut for AnyMapBorrowMut<'a, T> {
 }
 
 pub struct AnyMap {
-    map: HashMap<TypeId, RwLock<Box<dyn Any + 'static>>>,
+    map: HashMap<TypeId, RwLock<Box<dyn Any + 'static>>, TypeIdHasherBuilder>,
 }
 
 impl<'a> AnyMap {
     pub fn new() -> Self {
         Self {
-            map: HashMap::new(),
+            map: HashMap::with_hasher(TypeIdHasherBuilder()),
         }
     }
 
