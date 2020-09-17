@@ -122,18 +122,18 @@ macro_rules! impl_query_infos {
             #[allow(non_snake_case)]
             #[inline(always)]
             fn next(&mut self) -> Option<($($x,)*)> {
-                if self.0.len() == 0 {
+                if self.0.is_empty() {
                     return None;
+                } else {
+                    let ($($x,)*) = self;
+
+                    // SAFETY: is_next_some returned true which means that out iterator is Some(_).
+                    // Because the length of all the iterators in Iters must be the same this means all the other iterators must return Some(_) too.
+                    // See Iters::iter_from_guards
+                    return Some(($(
+                        unsafe { <$x as Borrow<'a>>::borrow_from_iter_unchecked($x) },
+                    )*));
                 }
-
-                let ($($x,)*) = self;
-
-                // SAFETY: is_next_some returned true which means that out iterator is Some(_).
-                // Because the length of all the iterators in Iters must be the same this means all the other iterators must return Some(_) too.
-                // See Iters::iter_from_guards
-                Some(($(
-                    unsafe { <$x as Borrow<'a>>::borrow_from_iter_unchecked($x) },
-                )*))
             }
 
             fn new_empty() -> Self {

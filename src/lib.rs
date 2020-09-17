@@ -1,3 +1,5 @@
+#![feature(exact_size_is_empty)]
+
 /*
 #![feature(box_syntax)]
 #![feature(libstd_sys_internals)]
