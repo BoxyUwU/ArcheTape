@@ -1,5 +1,6 @@
 use super::world::{Archetype, World};
 use std::any::{Any, TypeId};
+use std::iter::Peekable;
 use std::marker::PhantomData;
 use std::slice::{Iter, IterMut};
 use std::sync::{RwLockReadGuard, RwLockWriteGuard};
@@ -101,11 +102,20 @@ macro_rules! impl_query_infos {
         impl<'a, $($x: Borrow<'a>,)*> Iters<'a, ($($x,)*)> for ($($x::Iter,)*) {
             fn iter_from_guards<'guard: 'a>(locks: &'a mut [RwLockEitherGuard<'guard>]) -> Self {
                 let mut iter = locks.iter_mut();
+                let mut length = None;
 
                 ($(
                     {
                         let guard = iter.next().unwrap();
-                        <$x as Borrow<'a>>::iter_from_guard(guard)
+                        let (len, iter) = <$x as Borrow<'a>>::iter_from_guard(guard);
+
+                        // SAFETY, it's important that all iterators are the same length so that we can get_unchecked if the first iterator return Some()
+                        if length.is_none() {
+                            length = Some(len);
+                        }
+                        assert_eq!(length.unwrap(), len);
+
+                        iter
                     },
                 )*)
             }
@@ -113,10 +123,17 @@ macro_rules! impl_query_infos {
             #[allow(non_snake_case)]
             #[inline(always)]
             fn next(&mut self) -> Option<($($x,)*)> {
+                if !self.0.is_next_some() {
+                    return None;
+                }
+
                 let ($($x,)*) = self;
 
+                // SAFETY: is_next_some returned true which means that out iterator is Some(_).
+                // Because the length of all the iterators in Iters must be the same this means all the other iterators must return Some(_) too.
+                // See Iters::iter_from_guards
                 Some(($(
-                    <$x as Borrow<'a>>::borrow_from_iter($x)?,
+                    unsafe { <$x as Borrow<'a>>::borrow_from_iter_unchecked($x) },
                 )*))
             }
 
@@ -148,6 +165,7 @@ pub struct ItersIterator<'a, U: QueryInfos, T: Iters<'a, U>> {
 impl<'a, U: QueryInfos, T: Iters<'a, U>> Iterator for ItersIterator<'a, U, T> {
     type Item = U;
 
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next()
     }
@@ -168,28 +186,44 @@ pub trait Iters<'a, T: QueryInfos> {
     fn new_empty() -> Self;
 }
 
-pub trait Borrow<'b>: Sized {
-    type Of: 'static;
-    type Iter;
+pub trait BorrowIterator: Iterator {
+    fn is_next_some(&mut self) -> bool;
+}
 
-    fn iter_from_guard<'guard: 'b>(guard: &'b mut RwLockEitherGuard<'guard>) -> Self::Iter;
+impl<T: Iterator> BorrowIterator for Peekable<T> {
+    fn is_next_some(&mut self) -> bool {
+        self.peek().is_some()
+    }
+}
+
+// SAFETY: The length returned from iter_from_guards **must** be accurate as we rely on being able to call get_unchecked() if one iterator returns Some(_)
+pub unsafe trait Borrow<'b>: Sized {
+    type Of: 'static;
+    type Iter: BorrowIterator;
+
+    fn iter_from_guard<'guard: 'b>(guard: &'b mut RwLockEitherGuard<'guard>)
+        -> (usize, Self::Iter);
 
     fn borrow_from_iter<'a>(iter: &'a mut Self::Iter) -> Option<Self>;
+
+    unsafe fn borrow_from_iter_unchecked<'a>(iter: &'a mut Self::Iter) -> Self;
 
     fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard>;
 
     fn iter_empty<'a>() -> Self::Iter;
 }
 
-impl<'b, T: 'static> Borrow<'b> for &'b T {
+unsafe impl<'b, T: 'static> Borrow<'b> for &'b T {
     type Of = T;
-    type Iter = Iter<'b, T>;
+    type Iter = Peekable<Iter<'b, T>>;
 
-    fn iter_from_guard<'guard: 'b>(guard: &'b mut RwLockEitherGuard<'guard>) -> Self::Iter {
+    fn iter_from_guard<'guard: 'b>(
+        guard: &'b mut RwLockEitherGuard<'guard>,
+    ) -> (usize, Self::Iter) {
         match guard {
             RwLockEitherGuard::ReadGuard(guard) => {
                 let vec = guard.downcast_ref::<Vec<T>>().unwrap();
-                vec.iter()
+                (vec.len(), vec.iter().peekable())
             }
             _ => unreachable!(),
         }
@@ -198,6 +232,15 @@ impl<'b, T: 'static> Borrow<'b> for &'b T {
     #[inline(always)]
     fn borrow_from_iter<'a>(iter: &'a mut Self::Iter) -> Option<Self> {
         iter.next()
+    }
+
+    #[inline(always)]
+    #[allow(unused_unsafe)]
+    unsafe fn borrow_from_iter_unchecked<'a>(iter: &'a mut Self::Iter) -> Self {
+        match iter.next() {
+            Some(item) => return item,
+            _ => unsafe { std::hint::unreachable_unchecked() },
+        }
     }
 
     fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard> {
@@ -205,18 +248,20 @@ impl<'b, T: 'static> Borrow<'b> for &'b T {
     }
 
     fn iter_empty<'a>() -> Self::Iter {
-        [].iter()
+        [].iter().peekable()
     }
 }
-impl<'b, T: 'static> Borrow<'b> for &'b mut T {
+unsafe impl<'b, T: 'static> Borrow<'b> for &'b mut T {
     type Of = T;
-    type Iter = IterMut<'b, T>;
+    type Iter = Peekable<IterMut<'b, T>>;
 
-    fn iter_from_guard<'guard: 'b>(guard: &'b mut RwLockEitherGuard<'guard>) -> Self::Iter {
+    fn iter_from_guard<'guard: 'b>(
+        guard: &'b mut RwLockEitherGuard<'guard>,
+    ) -> (usize, Self::Iter) {
         match guard {
             RwLockEitherGuard::WriteGuard(guard) => {
                 let vec = guard.downcast_mut::<Vec<T>>().unwrap();
-                vec.iter_mut()
+                (vec.len(), vec.iter_mut().peekable())
             }
             _ => unreachable!(),
         }
@@ -227,12 +272,21 @@ impl<'b, T: 'static> Borrow<'b> for &'b mut T {
         iter.next()
     }
 
+    #[inline(always)]
+    #[allow(unused_unsafe)]
+    unsafe fn borrow_from_iter_unchecked<'a>(iter: &'a mut Self::Iter) -> Self {
+        match iter.next() {
+            Some(item) => item,
+            None => unsafe { std::hint::unreachable_unchecked() },
+        }
+    }
+
     fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard> {
         RwLockEitherGuard::WriteGuard(archetype.data.get_mut::<Vec<T>>().unwrap().guard)
     }
 
     fn iter_empty<'a>() -> Self::Iter {
-        [].iter_mut()
+        [].iter_mut().peekable()
     }
 }
 

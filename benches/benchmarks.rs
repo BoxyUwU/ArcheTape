@@ -254,7 +254,7 @@ pub fn ellecs(c: &mut Criterion) {
     group.bench_function("frag_insert_1_000_x_26", |b| {
         let mut bench = frag_insert::Benchmark::new();
         b.iter(move || bench.run());
-    });
+    });*/
     group.bench_function("simple_iter", |b| {
         let mut bench = simple_iter::Benchmark::new();
         b.iter(move || bench.run());
