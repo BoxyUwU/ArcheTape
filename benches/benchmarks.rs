@@ -31,16 +31,12 @@ pub mod frag_iter_2000 {
         }
 
         pub fn run(&mut self) {
-            let query = self.0.query::<(&mut Data,)>();
-            for (data,) in &mut query.borrow() {
-                data.0 *= 2.;
-            }
-        }
-
-        pub fn run_foreach(&mut self) {
-            self.0.query::<(&mut Data,)>().borrow().for_each(|(data,)| {
-                data.0 *= 2.0;
-            });
+            self.0
+                .query::<(&mut Data,)>()
+                .borrow()
+                .into_for_each_mut(|(data,)| {
+                    data.0 *= 2.0;
+                });
         }
     }
 }
@@ -76,17 +72,10 @@ pub mod frag_iter_20 {
         }
 
         pub fn run(&mut self) {
-            let query = self.0.query::<(&mut Data,)>();
-            for (data,) in &mut query.borrow() {
-                data.0 *= 2.;
-            }
-        }
-
-        pub fn run_foreach(&mut self) {
             self.0
                 .query::<(&mut Data,)>()
                 .borrow()
-                .for_each_mut(|(data,)| {
+                .into_for_each_mut(|(data,)| {
                     data.0 *= 2.;
                 });
         }
@@ -125,17 +114,10 @@ pub mod simple_iter {
         }
 
         pub fn run(&mut self) {
-            let query = self.0.query::<(&mut Position, &mut Velocity)>();
-            for (pos, vel) in &mut query.borrow() {
-                pos.0 += vel.0;
-            }
-        }
-
-        pub fn run_foreach(&mut self) {
             self.0
                 .query::<(&mut Position, &mut Velocity)>()
                 .borrow()
-                .for_each(|(pos, vel)| {
+                .into_for_each_mut(|(pos, vel)| {
                     pos.0 += vel.0;
                 });
         }
@@ -250,22 +232,6 @@ pub fn ellecs(c: &mut Criterion) {
     });
 }
 
-pub fn ellecs_foreach(c: &mut Criterion) {
-    let mut group = c.benchmark_group("ellecs_foreach");
-    group.bench_function("simple_iter_foreach", |b| {
-        let mut bench = simple_iter::Benchmark::new();
-        b.iter(move || bench.run_foreach());
-    });
-    group.bench_function("frag_iter_20_entity_foreach", |b| {
-        let mut bench = frag_iter_20::Benchmark::new();
-        b.iter(move || bench.run_foreach());
-    });
-    group.bench_function("frag_iter_2000_entity_foreach", |b| {
-        let mut bench = frag_iter_2000::Benchmark::new();
-        b.iter(move || bench.run_foreach());
-    });
-}
-
-criterion_group!(benchmarks, ellecs, ellecs_foreach);
+criterion_group!(benchmarks, ellecs);
 
 criterion_main!(benchmarks);

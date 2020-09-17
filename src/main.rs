@@ -6,7 +6,7 @@ fn main() {
 
     let query = world.query::<(&u32, &u64, &bool)>();
 
-    query.borrow().for_each(|(l, m, r)| {
+    query.borrow().into_for_each_mut(|(l, m, r)| {
         println!("{}, {}, {}", l, m, r);
     });
 }

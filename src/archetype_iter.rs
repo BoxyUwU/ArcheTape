@@ -81,43 +81,25 @@ macro_rules! impl_query_infos {
         }
 
         impl<'g: 'b, 'b, $($x: Borrow<'b>,)*> QueryBorrow<'b, 'g, ($($x,)*)> {
-            pub fn iter(&'b mut self) -> QueryIter<'b, ($($x,)*), ($(EitherIter<'b, $x::Of>,)*)> {
-                QueryIter::<'b, ($($x,)*), ($(EitherIter<'b, $x::Of>,)*)>::from_borrow(self)
-            }
+            pub fn into_for_each_mut<Func: FnMut(($($x,)*))>(&'b mut self, mut func: Func) {
+                let arity = <($($x,)*) as QueryInfos>::arity();
+                debug_assert!(self.lock_guards.len() % arity == 0);
 
-            pub fn for_each_mut<Func: FnMut(($($x,)*))>(&'b mut self, mut func: Func) {
-                let query_iter = self.iter();
-                for item in query_iter.cur_iter {
-                    func(item);
+                let mut iterators = Vec::with_capacity(self.lock_guards.len());
+
+                for chunk in self.lock_guards.chunks_mut(arity) {
+                    let iter = <($(
+                        EitherIter<$x::Of>,
+                    )*) as Iters<($($x,)*)>>::iter_from_guards(chunk);
+                    let iter: ItersIterator<'_, ($($x,)*), _> = ItersIterator::new(iter);
+                    iterators.push(iter);
                 }
 
-                for iter in query_iter.iters.into_iter() {
+                for iter in iterators {
                     for item in iter {
                         func(item);
                     }
                 }
-            }
-
-            pub fn for_each<Func: Fn(($($x,)*))>(&'b mut self, func: Func) {
-                let query_iter = self.iter();
-                for item in query_iter.cur_iter {
-                    func(item);
-                }
-
-                for iter in query_iter.iters.into_iter() {
-                    for item in iter {
-                        func(item);
-                    }
-                }
-            }
-        }
-
-        impl<'g: 'b, 'b, $($x: Borrow<'b>,)*> IntoIterator for &'b mut QueryBorrow<'b, 'g, ($($x,)*)> {
-            type Item = ($($x,)*);
-            type IntoIter = QueryIter<'b, Self::Item, ($(EitherIter<'b, $x::Of>,)*)>;
-
-            fn into_iter(self) -> QueryIter<'b, Self::Item, ($(EitherIter<'b, $x::Of>,)*)> {
-                QueryBorrow::<'b, 'g, ($($x,)*)>::iter(self)
             }
         }
 
@@ -189,53 +171,6 @@ pub trait Iters<'a, T: QueryInfos> {
     fn iter_from_guards<'guard: 'a>(locks: &'a mut [RwLockEitherGuard<'guard>]) -> Self;
     fn next(&mut self) -> Option<T>;
     fn new_empty() -> Self;
-}
-
-pub struct QueryIter<'a, T: QueryInfos, U: Iters<'a, T>> {
-    iters: Vec<ItersIterator<'a, T, U>>,
-    cur_iter: ItersIterator<'a, T, U>,
-    phantom: PhantomData<&'a T>,
-}
-
-impl<'a, T: QueryInfos, U: Iters<'a, T>> QueryIter<'a, T, U> {
-    pub fn from_borrow<'guard: 'a>(
-        borrows: &'a mut QueryBorrow<'a, 'guard, T>,
-    ) -> QueryIter<'a, T, U> {
-        let mut iters = Vec::new();
-        let arity = T::arity();
-
-        assert!(borrows.lock_guards.len() % arity == 0);
-        for chunk in borrows.lock_guards.chunks_exact_mut(arity) {
-            let iter = <U as Iters<'a, T>>::iter_from_guards(chunk);
-            let iters_iter = ItersIterator::new(iter);
-            iters.push(iters_iter);
-        }
-
-        let cur_iter = iters
-            .pop()
-            .or(Some(ItersIterator::new(Iters::new_empty())))
-            .unwrap();
-
-        QueryIter {
-            iters,
-            cur_iter,
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<'a, T: QueryInfos, U: Iters<'a, T>> Iterator for QueryIter<'a, T, U> {
-    type Item = T;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            match self.cur_iter.next() {
-                Some(item) => return Some(item),
-                None => self.cur_iter = self.iters.pop()?,
-            };
-        }
-    }
 }
 
 pub trait Borrow<'b>: Sized {
@@ -332,69 +267,11 @@ mod tests {
 
         let query = world.query::<(&mut u32, &u64)>();
         let mut checks = vec![(10, 12), (15, 14), (20, 16)].into_iter();
-        query.borrow().for_each_mut(|(left, right)| {
+        query.borrow().into_for_each_mut(|(left, right)| {
             assert_eq!(checks.next().unwrap(), (*left, *right));
         });
         assert_eq!(checks.next(), None);
     }
-
-    #[test]
-    fn iterator() {
-        let mut world = World::new();
-
-        world.spawn((10_u32, 12_u64));
-        world.spawn((15_u32, 14_u64));
-        world.spawn((20_u32, 16_u64));
-
-        let query = world.query::<(&mut u32, &u64)>();
-
-        let mut checks = vec![(10, 12), (15, 14), (20, 16)].into_iter();
-        for (left, right) in &mut query.borrow() {
-            assert_eq!((*left, *right), checks.next().unwrap());
-        }
-        assert!(checks.next().is_none());
-    }
-
-    #[test]
-    fn subset_iterator() {
-        let mut world = World::new();
-
-        world.spawn((10_u32, 12_u64));
-        world.spawn((15_u32, 14_u64));
-        world.spawn((20_u32, 16_u64));
-
-        let query = world.query::<(&mut u32,)>();
-
-        let mut checks = vec![10, 15, 20].into_iter();
-        for (left,) in &mut query.borrow() {
-            assert_eq!(*left, checks.next().unwrap());
-        }
-        assert!(checks.next().is_none());
-    }
-
-    #[test]
-    fn multi_archetype_iterator() {
-        let mut world = World::new();
-
-        world.spawn((10_u32, 12_u64));
-        world.spawn((15_u32, 14_u64));
-        world.spawn((20_u32, 16_u64));
-
-        world.spawn((11_u32, 12_u64, 99_u128));
-        world.spawn((16_u32, 14_u64, 99_u128));
-        world.spawn((21_u32, 16_u64, 99_u128));
-
-        let query = world.query::<(&mut u32,)>();
-
-        let mut checks = vec![11, 16, 21, 10, 15, 20].into_iter();
-        for (left,) in &mut query.borrow() {
-            assert_eq!(*left, checks.next().unwrap());
-        }
-        assert!(checks.next().is_none());
-    }
-
-    //
-    //
 
     #[test]
     fn for_each_iterator() {
@@ -409,7 +286,7 @@ mod tests {
         let mut checks = vec![(10, 12), (15, 14), (20, 16)].into_iter();
         query
             .borrow()
-            .for_each_mut(|(left, right)| assert_eq!((*left, *right), checks.next().unwrap()));
+            .into_for_each_mut(|(left, right)| assert_eq!((*left, *right), checks.next().unwrap()));
         assert!(checks.next().is_none());
     }
 
@@ -426,7 +303,7 @@ mod tests {
         let mut checks = vec![10, 15, 20].into_iter();
         query
             .borrow()
-            .for_each_mut(|(left,)| assert_eq!(*left, checks.next().unwrap()));
+            .into_for_each_mut(|(left,)| assert_eq!(*left, checks.next().unwrap()));
         assert!(checks.next().is_none());
     }
 
@@ -444,10 +321,10 @@ mod tests {
 
         let query = world.query::<(&mut u32,)>();
 
-        let mut checks = vec![11, 16, 21, 10, 15, 20].into_iter();
+        let mut checks = vec![10, 15, 20, 11, 16, 21].into_iter();
         query
             .borrow()
-            .for_each_mut(|(left,)| assert_eq!(*left, checks.next().unwrap()));
+            .into_for_each_mut(|(left,)| assert_eq!(*left, checks.next().unwrap()));
         assert!(checks.next().is_none());
     }
 }
