@@ -1,6 +1,5 @@
 use super::world::{Archetype, World};
 use std::any::{Any, TypeId};
-use std::iter::Peekable;
 use std::marker::PhantomData;
 use std::slice::{Iter, IterMut};
 use std::sync::{RwLockReadGuard, RwLockWriteGuard};
@@ -123,7 +122,7 @@ macro_rules! impl_query_infos {
             #[allow(non_snake_case)]
             #[inline(always)]
             fn next(&mut self) -> Option<($($x,)*)> {
-                if !self.0.is_next_some() {
+                if self.0.len() == 0 {
                     return None;
                 }
 
@@ -186,20 +185,10 @@ pub trait Iters<'a, T: QueryInfos> {
     fn new_empty() -> Self;
 }
 
-pub trait BorrowIterator: Iterator {
-    fn is_next_some(&mut self) -> bool;
-}
-
-impl<T: Iterator> BorrowIterator for Peekable<T> {
-    fn is_next_some(&mut self) -> bool {
-        self.peek().is_some()
-    }
-}
-
 // SAFETY: The length returned from iter_from_guards **must** be accurate as we rely on being able to call get_unchecked() if one iterator returns Some(_)
 pub unsafe trait Borrow<'b>: Sized {
     type Of: 'static;
-    type Iter: BorrowIterator;
+    type Iter: ExactSizeIterator;
 
     fn iter_from_guard<'guard: 'b>(guard: &'b mut RwLockEitherGuard<'guard>)
         -> (usize, Self::Iter);
@@ -215,7 +204,7 @@ pub unsafe trait Borrow<'b>: Sized {
 
 unsafe impl<'b, T: 'static> Borrow<'b> for &'b T {
     type Of = T;
-    type Iter = Peekable<Iter<'b, T>>;
+    type Iter = Iter<'b, T>;
 
     fn iter_from_guard<'guard: 'b>(
         guard: &'b mut RwLockEitherGuard<'guard>,
@@ -223,7 +212,7 @@ unsafe impl<'b, T: 'static> Borrow<'b> for &'b T {
         match guard {
             RwLockEitherGuard::ReadGuard(guard) => {
                 let vec = guard.downcast_ref::<Vec<T>>().unwrap();
-                (vec.len(), vec.iter().peekable())
+                (vec.len(), vec.iter())
             }
             _ => unreachable!(),
         }
@@ -248,12 +237,12 @@ unsafe impl<'b, T: 'static> Borrow<'b> for &'b T {
     }
 
     fn iter_empty<'a>() -> Self::Iter {
-        [].iter().peekable()
+        [].iter()
     }
 }
 unsafe impl<'b, T: 'static> Borrow<'b> for &'b mut T {
     type Of = T;
-    type Iter = Peekable<IterMut<'b, T>>;
+    type Iter = IterMut<'b, T>;
 
     fn iter_from_guard<'guard: 'b>(
         guard: &'b mut RwLockEitherGuard<'guard>,
@@ -261,7 +250,7 @@ unsafe impl<'b, T: 'static> Borrow<'b> for &'b mut T {
         match guard {
             RwLockEitherGuard::WriteGuard(guard) => {
                 let vec = guard.downcast_mut::<Vec<T>>().unwrap();
-                (vec.len(), vec.iter_mut().peekable())
+                (vec.len(), vec.iter_mut())
             }
             _ => unreachable!(),
         }
@@ -286,7 +275,7 @@ unsafe impl<'b, T: 'static> Borrow<'b> for &'b mut T {
     }
 
     fn iter_empty<'a>() -> Self::Iter {
-        [].iter_mut().peekable()
+        [].iter_mut()
     }
 }
 

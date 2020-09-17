@@ -126,7 +126,6 @@ pub mod anymap {
 pub mod archetype_iter {
     use super::world::{Archetype, World};
     use std::any::{Any, TypeId};
-    use std::iter::Peekable;
     use std::marker::PhantomData;
     use std::slice::{Iter, IterMut};
     use std::sync::{RwLockReadGuard, RwLockWriteGuard};
@@ -716,7 +715,7 @@ pub mod archetype_iter {
         #[allow(non_snake_case)]
         #[inline(always)]
         fn next(&mut self) -> Option<(A, B, C, D, E, F, G, H, I, J)> {
-            if !self.0.is_next_some() {
+            if self.0.len() == 0 {
                 return None;
             }
             let (A, B, C, D, E, F, G, H, I, J) = self;
@@ -1231,7 +1230,7 @@ pub mod archetype_iter {
         #[allow(non_snake_case)]
         #[inline(always)]
         fn next(&mut self) -> Option<(A, B, C, D, E, F, G, H, I)> {
-            if !self.0.is_next_some() {
+            if self.0.len() == 0 {
                 return None;
             }
             let (A, B, C, D, E, F, G, H, I) = self;
@@ -1697,7 +1696,7 @@ pub mod archetype_iter {
         #[allow(non_snake_case)]
         #[inline(always)]
         fn next(&mut self) -> Option<(A, B, C, D, E, F, G, H)> {
-            if !self.0.is_next_some() {
+            if self.0.len() == 0 {
                 return None;
             }
             let (A, B, C, D, E, F, G, H) = self;
@@ -2111,7 +2110,7 @@ pub mod archetype_iter {
         #[allow(non_snake_case)]
         #[inline(always)]
         fn next(&mut self) -> Option<(A, B, C, D, E, F, G)> {
-            if !self.0.is_next_some() {
+            if self.0.len() == 0 {
                 return None;
             }
             let (A, B, C, D, E, F, G) = self;
@@ -2468,7 +2467,7 @@ pub mod archetype_iter {
         #[allow(non_snake_case)]
         #[inline(always)]
         fn next(&mut self) -> Option<(A, B, C, D, E, F)> {
-            if !self.0.is_next_some() {
+            if self.0.len() == 0 {
                 return None;
             }
             let (A, B, C, D, E, F) = self;
@@ -2759,7 +2758,7 @@ pub mod archetype_iter {
         #[allow(non_snake_case)]
         #[inline(always)]
         fn next(&mut self) -> Option<(A, B, C, D, E)> {
-            if !self.0.is_next_some() {
+            if self.0.len() == 0 {
                 return None;
             }
             let (A, B, C, D, E) = self;
@@ -3002,7 +3001,7 @@ pub mod archetype_iter {
         #[allow(non_snake_case)]
         #[inline(always)]
         fn next(&mut self) -> Option<(A, B, C, D)> {
-            if !self.0.is_next_some() {
+            if self.0.len() == 0 {
                 return None;
             }
             let (A, B, C, D) = self;
@@ -3198,7 +3197,7 @@ pub mod archetype_iter {
         #[allow(non_snake_case)]
         #[inline(always)]
         fn next(&mut self) -> Option<(A, B, C)> {
-            if !self.0.is_next_some() {
+            if self.0.len() == 0 {
                 return None;
             }
             let (A, B, C) = self;
@@ -3345,7 +3344,7 @@ pub mod archetype_iter {
         #[allow(non_snake_case)]
         #[inline(always)]
         fn next(&mut self) -> Option<(A, B)> {
-            if !self.0.is_next_some() {
+            if self.0.len() == 0 {
                 return None;
             }
             let (A, B) = self;
@@ -3446,7 +3445,7 @@ pub mod archetype_iter {
         #[allow(non_snake_case)]
         #[inline(always)]
         fn next(&mut self) -> Option<(A,)> {
-            if !self.0.is_next_some() {
+            if self.0.len() == 0 {
                 return None;
             }
             let (A,) = self;
@@ -3480,17 +3479,9 @@ pub mod archetype_iter {
         fn next(&mut self) -> Option<T>;
         fn new_empty() -> Self;
     }
-    pub trait BorrowIterator: Iterator {
-        fn is_next_some(&mut self) -> bool;
-    }
-    impl<T: Iterator> BorrowIterator for Peekable<T> {
-        fn is_next_some(&mut self) -> bool {
-            self.peek().is_some()
-        }
-    }
     pub unsafe trait Borrow<'b>: Sized {
         type Of: 'static;
-        type Iter: BorrowIterator;
+        type Iter: ExactSizeIterator;
         fn iter_from_guard<'guard: 'b>(
             guard: &'b mut RwLockEitherGuard<'guard>,
         ) -> (usize, Self::Iter);
@@ -3502,14 +3493,14 @@ pub mod archetype_iter {
     }
     unsafe impl<'b, T: 'static> Borrow<'b> for &'b T {
         type Of = T;
-        type Iter = Peekable<Iter<'b, T>>;
+        type Iter = Iter<'b, T>;
         fn iter_from_guard<'guard: 'b>(
             guard: &'b mut RwLockEitherGuard<'guard>,
         ) -> (usize, Self::Iter) {
             match guard {
                 RwLockEitherGuard::ReadGuard(guard) => {
                     let vec = guard.downcast_ref::<Vec<T>>().unwrap();
-                    (vec.len(), vec.iter().peekable())
+                    (vec.len(), vec.iter())
                 }
                 _ => ::std::rt::begin_panic("internal error: entered unreachable code"),
             }
@@ -3523,7 +3514,7 @@ pub mod archetype_iter {
         unsafe fn borrow_from_iter_unchecked<'a>(iter: &'a mut Self::Iter) -> Self {
             match iter.next() {
                 Some(item) => return item,
-                None => unsafe { std::hint::unreachable_unchecked() },
+                _ => unsafe { std::hint::unreachable_unchecked() },
             }
         }
         fn guards_from_archetype<'guard>(
@@ -3532,19 +3523,19 @@ pub mod archetype_iter {
             RwLockEitherGuard::ReadGuard(archetype.data.get::<Vec<T>>().unwrap().guard)
         }
         fn iter_empty<'a>() -> Self::Iter {
-            [].iter().peekable()
+            [].iter()
         }
     }
     unsafe impl<'b, T: 'static> Borrow<'b> for &'b mut T {
         type Of = T;
-        type Iter = Peekable<IterMut<'b, T>>;
+        type Iter = IterMut<'b, T>;
         fn iter_from_guard<'guard: 'b>(
             guard: &'b mut RwLockEitherGuard<'guard>,
         ) -> (usize, Self::Iter) {
             match guard {
                 RwLockEitherGuard::WriteGuard(guard) => {
                     let vec = guard.downcast_mut::<Vec<T>>().unwrap();
-                    (vec.len(), vec.iter_mut().peekable())
+                    (vec.len(), vec.iter_mut())
                 }
                 _ => ::std::rt::begin_panic("internal error: entered unreachable code"),
             }
@@ -3567,7 +3558,7 @@ pub mod archetype_iter {
             RwLockEitherGuard::WriteGuard(archetype.data.get_mut::<Vec<T>>().unwrap().guard)
         }
         fn iter_empty<'a>() -> Self::Iter {
-            [].iter_mut().peekable()
+            [].iter_mut()
         }
     }
 }

@@ -211,31 +211,38 @@ pub mod frag_insert {
 pub mod simple_large_iter {
     use ellecs::world::World;
 
-    pub struct A(u8);
-    pub struct B(u8);
-    pub struct C(u8);
-    pub struct D(u8);
-    pub struct E(u8);
-    pub struct F(u8);
-    pub struct G(u8);
-    pub struct H(u8);
+    pub struct A(f32);
+    pub struct B(f32);
+    pub struct C(f32);
+    pub struct D(f32);
+    pub struct E(f32);
+    pub struct F(f32);
+    pub struct G(f32);
+    pub struct H(f32);
 
     pub struct Benchmark(World);
 
     impl Benchmark {
         pub fn new() -> Self {
             let mut world = World::new();
-            for _ in 0..100_000 {
-                world.spawn((A(1), B(1), C(1), D(1), E(1), F(1), G(1), H(1)));
+            for _ in 0..10_000 {
+                world.spawn((A(1.), B(1.), C(1.), D(1.), E(1.), F(1.), G(1.), H(1.)));
             }
             Benchmark(world)
         }
 
         pub fn run(&mut self) {
-            let query = self.0.query::<(&A, &B, &C, &D, &E, &F, &G, &H)>();
+            let query = self
+                .0
+                .query::<(&mut A, &B, &mut C, &D, &mut E, &F, &mut G, &H)>();
             query
                 .borrow()
-                .into_for_each_mut(|(_a, _b, _c, _d, _e, _f, _g, _h)| {});
+                .into_for_each_mut(|(a, b, c, d, e, f, g, h)| {
+                    a.0 += b.0;
+                    c.0 += d.0;
+                    e.0 += f.0;
+                    g.0 += h.0;
+                });
         }
     }
 }
