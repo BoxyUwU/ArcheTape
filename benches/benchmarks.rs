@@ -208,8 +208,45 @@ pub mod frag_insert {
     }
 }
 
+pub mod simple_large_iter {
+    use cgmath::*;
+    use ellecs::world::World;
+
+    pub struct A(u8);
+    pub struct B(u8);
+    pub struct C(u8);
+    pub struct D(u8);
+    pub struct E(u8);
+    pub struct F(u8);
+    pub struct G(u8);
+    pub struct H(u8);
+
+    pub struct Benchmark(World);
+
+    impl Benchmark {
+        pub fn new() -> Self {
+            let mut world = World::new();
+            for _ in 0..100_000 {
+                world.spawn((A(1), B(1), C(1), D(1), E(1), F(1), G(1), H(1)));
+            }
+            Benchmark(world)
+        }
+
+        pub fn run(&mut self) {
+            let query = self.0.query::<(&A, &B, &C, &D, &E, &F, &G, &H)>();
+            query
+                .borrow()
+                .into_for_each_mut(|(_a, _b, _c, _d, _e, _f, _g, _h)| {});
+        }
+    }
+}
+
 pub fn ellecs(c: &mut Criterion) {
     let mut group = c.benchmark_group("ellecs");
+    group.bench_function("simple_large_iter", |b| {
+        let mut bench = simple_large_iter::Benchmark::new();
+        b.iter(move || bench.run());
+    });
     group.bench_function("simple_insert_10_000", |b| {
         let mut bench = simple_insert::Benchmark::new();
         b.iter(move || bench.run());
