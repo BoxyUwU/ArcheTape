@@ -4,11 +4,6 @@ use std::marker::PhantomData;
 use std::slice::{Iter, IterMut};
 use std::sync::{RwLockReadGuard, RwLockWriteGuard};
 
-pub enum EitherIter<'a, T> {
-    Mut(IterMut<'a, T>),
-    Immut(Iter<'a, T>),
-}
-
 pub enum RwLockEitherGuard<'a> {
     WriteGuard(RwLockWriteGuard<'a, Box<dyn Any>>),
     ReadGuard(RwLockReadGuard<'a, Box<dyn Any>>),
@@ -89,7 +84,7 @@ macro_rules! impl_query_infos {
 
                 for chunk in self.lock_guards.chunks_mut(arity) {
                     let iter = <($(
-                        EitherIter<$x::Of>,
+                        $x::Iter,
                     )*) as Iters<($($x,)*)>>::iter_from_guards(chunk);
                     let iter: ItersIterator<'_, ($($x,)*), _> = ItersIterator::new(iter);
                     iterators.push(iter);
@@ -103,14 +98,14 @@ macro_rules! impl_query_infos {
             }
         }
 
-        impl<'a, $($x: Borrow<'a>,)*> Iters<'a, ($($x,)*)> for ($(EitherIter<'a, $x::Of>,)*) {
-            fn iter_from_guards<'guard: 'a>(locks: &'a mut [RwLockEitherGuard<'guard>]) -> ($(EitherIter<'a, $x::Of>,)*) {
+        impl<'a, $($x: Borrow<'a>,)*> Iters<'a, ($($x,)*)> for ($($x::Iter,)*) {
+            fn iter_from_guards<'guard: 'a>(locks: &'a mut [RwLockEitherGuard<'guard>]) -> Self {
                 let mut iter = locks.iter_mut();
 
                 ($(
                     {
                         let guard = iter.next().unwrap();
-                        <$x as Borrow<'a>>::either_iter_from_guard(guard)
+                        <$x as Borrow<'a>>::iter_from_guard(guard)
                     },
                 )*)
             }
@@ -127,7 +122,7 @@ macro_rules! impl_query_infos {
 
             fn new_empty() -> Self {
                 ($(
-                    <$x as Borrow<'a>>::either_iter_empty(),
+                    <$x as Borrow<'a>>::iter_empty(),
                 )*)
             }
         }
@@ -175,81 +170,69 @@ pub trait Iters<'a, T: QueryInfos> {
 
 pub trait Borrow<'b>: Sized {
     type Of: 'static;
+    type Iter;
 
-    fn either_iter_from_guard<'a, 'guard: 'a>(
-        guard: &'a mut RwLockEitherGuard<'guard>,
-    ) -> EitherIter<'a, Self::Of>;
+    fn iter_from_guard<'guard: 'b>(guard: &'b mut RwLockEitherGuard<'guard>) -> Self::Iter;
 
-    fn borrow_from_iter<'a>(iter: &'a mut EitherIter<'b, Self::Of>) -> Option<Self>;
+    fn borrow_from_iter<'a>(iter: &'a mut Self::Iter) -> Option<Self>;
 
     fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard>;
 
-    fn either_iter_empty<'a>() -> EitherIter<'a, Self::Of>;
+    fn iter_empty<'a>() -> Self::Iter;
 }
 
 impl<'b, T: 'static> Borrow<'b> for &'b T {
     type Of = T;
+    type Iter = Iter<'b, T>;
 
-    fn either_iter_from_guard<'a, 'guard: 'a>(
-        guard: &'a mut RwLockEitherGuard<'guard>,
-    ) -> EitherIter<'a, Self::Of> {
+    fn iter_from_guard<'guard: 'b>(guard: &'b mut RwLockEitherGuard<'guard>) -> Self::Iter {
         match guard {
             RwLockEitherGuard::ReadGuard(guard) => {
                 let vec = guard.downcast_ref::<Vec<T>>().unwrap();
-                EitherIter::Immut(vec.iter())
+                vec.iter()
             }
             _ => unreachable!(),
         }
     }
 
     #[inline(always)]
-    fn borrow_from_iter<'a>(iter: &'a mut EitherIter<'b, Self::Of>) -> Option<Self> {
-        match iter {
-            EitherIter::Immut(iter) => iter.next(),
-            //_ => unreachable!(),
-            // TODO get rid of this and the unreachable in either_iter_from_guard by using Concrete types instead of EitherIter and friends
-            _ => unsafe { std::hint::unreachable_unchecked() },
-        }
+    fn borrow_from_iter<'a>(iter: &'a mut Self::Iter) -> Option<Self> {
+        iter.next()
     }
 
     fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard> {
         RwLockEitherGuard::ReadGuard(archetype.data.get::<Vec<T>>().unwrap().guard)
     }
 
-    fn either_iter_empty<'a>() -> EitherIter<'a, Self::Of> {
-        EitherIter::Immut([].iter())
+    fn iter_empty<'a>() -> Self::Iter {
+        [].iter()
     }
 }
 impl<'b, T: 'static> Borrow<'b> for &'b mut T {
     type Of = T;
+    type Iter = IterMut<'b, T>;
 
-    fn either_iter_from_guard<'a, 'guard: 'a>(
-        guard: &'a mut RwLockEitherGuard<'guard>,
-    ) -> EitherIter<'a, Self::Of> {
+    fn iter_from_guard<'guard: 'b>(guard: &'b mut RwLockEitherGuard<'guard>) -> Self::Iter {
         match guard {
             RwLockEitherGuard::WriteGuard(guard) => {
                 let vec = guard.downcast_mut::<Vec<T>>().unwrap();
-                EitherIter::Mut(vec.iter_mut())
+                vec.iter_mut()
             }
             _ => unreachable!(),
         }
     }
 
     #[inline(always)]
-    fn borrow_from_iter<'a>(iter: &'a mut EitherIter<'b, Self::Of>) -> Option<Self> {
-        match iter {
-            EitherIter::Mut(iter) => iter.next(),
-            // _ => unreachable!(),
-            _ => unsafe { std::hint::unreachable_unchecked() },
-        }
+    fn borrow_from_iter<'a>(iter: &'a mut Self::Iter) -> Option<Self> {
+        iter.next()
     }
 
     fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard> {
         RwLockEitherGuard::WriteGuard(archetype.data.get_mut::<Vec<T>>().unwrap().guard)
     }
 
-    fn either_iter_empty<'a>() -> EitherIter<'a, Self::Of> {
-        EitherIter::Mut([].iter_mut())
+    fn iter_empty<'a>() -> Self::Iter {
+        [].iter_mut()
     }
 }
 
