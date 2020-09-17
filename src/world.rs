@@ -21,8 +21,9 @@ impl Archetype {
 }
 
 pub struct World {
-    pub(crate) archetypes: Vec<Archetype>,
+    pub archetypes: Vec<Archetype>,
     owned_resources: AnyMap,
+    cache: Vec<(Vec<TypeId>, usize)>,
 }
 
 impl World {
@@ -30,6 +31,7 @@ impl World {
         Self {
             archetypes: Vec::new(),
             owned_resources: AnyMap::new(),
+            cache: Vec::with_capacity(8),
         }
     }
 
@@ -37,16 +39,35 @@ impl World {
         Query::<T>::new(self)
     }
 
-    pub fn find_archetype<T: Bundle>(&self) -> Option<usize> {
-        let type_ids = T::type_ids();
+    pub fn find_archetype<T: Bundle>(&mut self, type_ids: &[TypeId]) -> Option<usize> {
+        debug_assert!(T::type_ids() == type_ids);
 
-        self.archetypes
+        for (cached_type_id, archetype) in self.cache.iter() {
+            if *cached_type_id == type_ids {
+                return Some(*archetype);
+            }
+        }
+
+        let position = self
+            .archetypes
             .iter()
-            .position(|archetype| archetype.type_ids == type_ids)
+            .position(|archetype| archetype.type_ids == type_ids);
+
+        if let Some(position) = position {
+            if self.cache.len() > 8 {
+                self.cache.pop();
+            }
+            self.cache.insert(0, (Vec::from(type_ids), position));
+        }
+
+        position
     }
 
-    pub fn find_archetype_or_insert<T: Bundle>(&mut self) -> usize {
-        self.find_archetype::<T>().unwrap_or_else(|| {
+    pub fn find_archetype_or_insert<T: Bundle>(&mut self, type_ids: &[TypeId]) -> usize {
+        debug_assert!(T::type_ids() == type_ids);
+
+        self.find_archetype::<T>(type_ids).unwrap_or_else(|| {
+            self.cache.clear();
             self.archetypes.push(T::new_archetype());
             self.archetypes.len() - 1
         })
@@ -65,7 +86,8 @@ impl World {
     }
 
     pub fn spawn<T: Bundle>(&mut self, bundle: T) {
-        let archetype_idx = self.find_archetype_or_insert::<T>();
+        let type_ids = T::type_ids();
+        let archetype_idx = self.find_archetype_or_insert::<T>(&type_ids);
         self.archetypes
             .get_mut(archetype_idx)
             .unwrap()

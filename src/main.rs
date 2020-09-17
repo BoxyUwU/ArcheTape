@@ -1,28 +1,12 @@
 use ellecs::world::World;
 
-macro_rules! setup {
-    ($world:ident, $($x:ident),*) => {
-        $(
-            pub struct $x(f32);
-        )*
-
-        $(
-            for _ in 0..2000 {
-                $world.spawn(($x(0.), Data(1.)));
-            }
-        )*
-    };
-}
-
 fn main() {
     let mut world = World::new();
-    setup!(world, A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z);
+    world.spawn((10_u32, 12_u64, true));
 
-    for _ in 0..1000000 {
-        world.query::<(&mut Data,)>().borrow().for_each(|(data,)| {
-            data.0 *= 2.;
-        });
-    }
+    let query = world.query::<(&u32, &u64, &bool)>();
+
+    query.borrow().for_each(|(l, m, r)| {
+        println!("{}, {}, {}", l, m, r);
+    });
 }
-
-pub struct Data(f32);

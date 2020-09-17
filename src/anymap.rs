@@ -108,6 +108,14 @@ impl<'a> AnyMap {
         Ok(borrow)
     }
 
+    pub fn get_mut_with_self<'this, T: 'static>(
+        &'this mut self,
+    ) -> Result<&mut Box<dyn Any>, Box<dyn Error + 'this>> {
+        let type_id = TypeId::of::<T>();
+        let rw_lock = self.map.get_mut(&type_id).unwrap();
+        Ok(rw_lock.get_mut()?)
+    }
+
     pub fn get_mut<'this, T: 'static>(
         &'this self,
     ) -> Result<AnyMapBorrowMut<'this, T>, Box<dyn Error + 'this>> {
