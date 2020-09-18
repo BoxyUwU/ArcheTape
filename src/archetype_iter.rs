@@ -28,7 +28,7 @@ impl<'a, T: QueryInfos + 'a> Query<'a, T> {
         let mut guards = Vec::with_capacity(16);
 
         for archetype in archetypes.map(|idx| self.world.archetypes.get(idx).unwrap()) {
-            T::borrow_guards(&mut guards, archetype)
+            T::borrow_guards(&mut guards, archetype);
         }
 
         QueryBorrow {
