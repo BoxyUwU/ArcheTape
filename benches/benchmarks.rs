@@ -249,6 +249,10 @@ pub mod simple_large_iter {
 
 pub fn ellecs(c: &mut Criterion) {
     let mut group = c.benchmark_group("ellecs");
+    group.bench_function("frag_iter_2000_entity", |b| {
+        let mut bench = frag_iter_2000::Benchmark::new();
+        b.iter(move || bench.run());
+    });
     group.bench_function("simple_large_iter", |b| {
         let mut bench = simple_large_iter::Benchmark::new();
         b.iter(move || bench.run());
@@ -267,10 +271,6 @@ pub fn ellecs(c: &mut Criterion) {
     });
     group.bench_function("frag_iter_20_entity", |b| {
         let mut bench = frag_iter_20::Benchmark::new();
-        b.iter(move || bench.run());
-    });
-    group.bench_function("frag_iter_2000_entity", |b| {
-        let mut bench = frag_iter_2000::Benchmark::new();
         b.iter(move || bench.run());
     });
 }

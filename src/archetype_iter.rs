@@ -28,7 +28,7 @@ impl<'a, T: QueryInfos + 'a> Query<'a, T> {
         let mut guards = Vec::with_capacity(16);
 
         for archetype in archetypes.map(|idx| self.world.archetypes.get(idx).unwrap()) {
-            guards.extend(T::borrow_guards(archetype));
+            T::borrow_guards(&mut guards, archetype)
         }
 
         QueryBorrow {
@@ -48,7 +48,10 @@ pub struct QueryBorrow<'b, 'guard, T: QueryInfos + 'b> {
 pub trait QueryInfos {
     fn arity() -> usize;
     fn type_ids() -> Vec<TypeId>;
-    fn borrow_guards<'guard>(archetype: &'guard Archetype) -> Vec<RwLockEitherGuard<'guard>>;
+    fn borrow_guards<'guard>(
+        guards: &mut Vec<RwLockEitherGuard<'guard>>,
+        archetype: &'guard Archetype,
+    );
 }
 
 macro_rules! impl_query_infos {
@@ -68,10 +71,10 @@ macro_rules! impl_query_infos {
                 vec![$(TypeId::of::<$x::Of>(),)*]
             }
 
-            fn borrow_guards<'guard>(archetype: &'guard Archetype) -> Vec<RwLockEitherGuard<'guard>> {
-                vec![$(
-                    $x::guards_from_archetype(archetype),
-                )*]
+            fn borrow_guards<'guard>(guards: &mut Vec<RwLockEitherGuard<'guard>>, archetype: &'guard Archetype) {
+                $(
+                    guards.push($x::guards_from_archetype(archetype));
+                )*
             }
         }
 
