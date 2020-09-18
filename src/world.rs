@@ -1,12 +1,14 @@
 use super::anymap::{AnyMap, AnyMapBorrow, AnyMapBorrowMut};
 use super::archetype_iter::{Query, QueryInfos};
 use super::bundle::Bundle;
+use super::entities::{Entities, Entity};
 use super::lifetime_anymap::{LifetimeAnyMap, LifetimeAnyMapBorrow, LifetimeAnyMapBorrowMut};
 use std::any::TypeId;
 use std::error::Error;
 
 pub struct Archetype {
     pub type_ids: Vec<TypeId>,
+    pub entities: Vec<Entity>,
     pub data: AnyMap,
 }
 
@@ -15,14 +17,15 @@ impl Archetype {
         T::new_archetype()
     }
 
-    pub fn add<T: Bundle>(&mut self, components: T) -> Result<(), Box<dyn Error>> {
-        components.add_to_archetype(self)
+    pub fn add<T: Bundle>(&mut self, components: T, entity: Entity) -> Result<(), Box<dyn Error>> {
+        components.add_to_archetype(self, entity)
     }
 }
 
 pub struct World {
     pub archetypes: Vec<Archetype>,
     owned_resources: AnyMap,
+    entities: Entities,
     cache: Vec<(Vec<TypeId>, usize)>,
 }
 
@@ -31,6 +34,7 @@ impl World {
         Self {
             archetypes: Vec::new(),
             owned_resources: AnyMap::new(),
+            entities: Entities::new(),
             cache: Vec::with_capacity(8),
         }
     }
@@ -86,12 +90,14 @@ impl World {
     }
 
     pub fn spawn<T: Bundle>(&mut self, bundle: T) {
+        let entity = self.entities.spawn();
+
         let type_ids = T::type_ids();
         let archetype_idx = self.find_archetype_or_insert::<T>(&type_ids);
         self.archetypes
             .get_mut(archetype_idx)
             .unwrap()
-            .add(bundle)
+            .add(bundle, entity)
             .unwrap();
     }
 

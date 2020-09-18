@@ -1,4 +1,5 @@
 use super::anymap::AnyMap;
+use super::entities::Entity;
 use super::world::Archetype;
 use std::any::TypeId;
 use std::error::Error;
@@ -6,7 +7,11 @@ use std::error::Error;
 pub trait Bundle {
     fn type_ids() -> Vec<TypeId>;
     fn new_archetype() -> Archetype;
-    fn add_to_archetype(self, archetype: &mut Archetype) -> Result<(), Box<dyn Error>>;
+    fn add_to_archetype(
+        self,
+        archetype: &mut Archetype,
+        entity: Entity,
+    ) -> Result<(), Box<dyn Error>>;
 }
 
 macro_rules! impl_bundle {
@@ -28,15 +33,17 @@ macro_rules! impl_bundle {
 
                 Archetype {
                     data,
+                    entities: Vec::new(),
                     type_ids,
                 }
             }
 
-            fn add_to_archetype(self, archetype: &mut Archetype) -> Result<(), Box<dyn Error>> {
+            fn add_to_archetype(self, archetype: &mut Archetype, entity: Entity) -> Result<(), Box<dyn Error>> {
                 debug_assert!(Self::type_ids() == archetype.type_ids);
 
                 let ($($x,)*) = self;
 
+                archetype.entities.push(entity);
                 $(
                     archetype.data.get_mut_with_self::<Vec<$x>>().unwrap().downcast_mut::<Vec<$x>>().unwrap().push($x);
                 )*

@@ -1,3 +1,4 @@
+use super::entities::{Entities, Entity};
 use super::world::{Archetype, World};
 use std::any::{Any, TypeId};
 use std::marker::PhantomData;
@@ -10,12 +11,12 @@ pub enum RwLockEitherGuard<'a> {
 }
 
 #[derive(Copy, Clone)]
-pub struct Query<'a, T: QueryInfos + 'a> {
+pub struct Query<'a, T: QueryInfos + 'static> {
     world: &'a World,
     phantom: PhantomData<T>,
 }
 
-impl<'a, T: QueryInfos + 'a> Query<'a, T> {
+impl<'a, T: QueryInfos + 'static> Query<'a, T> {
     pub fn new(world: &'a World) -> Self {
         Self {
             world,
@@ -39,13 +40,13 @@ impl<'a, T: QueryInfos + 'a> Query<'a, T> {
     }
 }
 
-pub struct QueryBorrow<'b, 'guard, T: QueryInfos + 'b> {
+pub struct QueryBorrow<'b, 'guard, T: QueryInfos + 'static> {
     lock_guards: Vec<RwLockEitherGuard<'guard>>,
     phantom: PhantomData<T>,
     phantom2: PhantomData<&'b ()>,
 }
 
-pub trait QueryInfos {
+pub trait QueryInfos: 'static {
     fn arity() -> usize;
     fn type_ids() -> Vec<TypeId>;
     fn borrow_guards<'guard>(
@@ -79,7 +80,7 @@ macro_rules! impl_query_infos {
         }
 
         impl<'g: 'b, 'b, $($x: Borrow<'b>,)*> QueryBorrow<'b, 'g, ($($x,)*)> {
-            pub fn into_for_each_mut<Func: FnMut(($($x,)*))>(&'b mut self, mut func: Func) {
+            pub fn into_for_each_mut<Func: FnMut(($($x::Returns,)*))>(&'b mut self, mut func: Func) {
                 let arity = <($($x,)*) as QueryInfos>::arity();
                 debug_assert!(self.lock_guards.len() % arity == 0);
 
@@ -101,7 +102,9 @@ macro_rules! impl_query_infos {
             }
         }
 
-        impl<'a, $($x: Borrow<'a>,)*> Iters<'a, ($($x,)*)> for ($($x::Iter,)*) {
+        impl<'a, $($x: Borrow<'a>,)*> Iters<'a, ($($x,)*)> for ($(<$x as Borrow<'a>>::Iter,)*) {
+            type Returns = ($($x::Returns,)*);
+
             fn iter_from_guards<'guard: 'a>(locks: &'a mut [RwLockEitherGuard<'guard>]) -> Self {
                 let mut iter = locks.iter_mut();
                 let mut length = None;
@@ -124,7 +127,7 @@ macro_rules! impl_query_infos {
 
             #[allow(non_snake_case)]
             #[inline(always)]
-            fn next(&mut self) -> Option<($($x,)*)> {
+            fn next(&mut self) -> Option<Self::Returns> {
                 if self.0.is_empty() {
                     return None;
                 } else {
@@ -159,13 +162,13 @@ impl_query_infos!(A B C);
 impl_query_infos!(A B);
 impl_query_infos!(A);
 
-pub struct ItersIterator<'a, U: QueryInfos, T: Iters<'a, U>> {
+pub struct ItersIterator<'a, U: QueryInfos + 'static, T: Iters<'a, U>> {
     iter: T,
     phantom: PhantomData<&'a U>,
 }
 
-impl<'a, U: QueryInfos, T: Iters<'a, U>> Iterator for ItersIterator<'a, U, T> {
-    type Item = U;
+impl<'a, U: QueryInfos + 'static, T: Iters<'a, U>> Iterator for ItersIterator<'a, U, T> {
+    type Item = T::Returns;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
@@ -173,7 +176,7 @@ impl<'a, U: QueryInfos, T: Iters<'a, U>> Iterator for ItersIterator<'a, U, T> {
     }
 }
 
-impl<'a, U: QueryInfos, T: Iters<'a, U>> ItersIterator<'a, U, T> {
+impl<'a, U: QueryInfos + 'static, T: Iters<'a, U>> ItersIterator<'a, U, T> {
     pub fn new(iter: T) -> Self {
         Self {
             iter,
@@ -182,31 +185,35 @@ impl<'a, U: QueryInfos, T: Iters<'a, U>> ItersIterator<'a, U, T> {
     }
 }
 
-pub trait Iters<'a, T: QueryInfos> {
+pub trait Iters<'a, T: QueryInfos + 'static> {
+    type Returns;
+
     fn iter_from_guards<'guard: 'a>(locks: &'a mut [RwLockEitherGuard<'guard>]) -> Self;
-    fn next(&mut self) -> Option<T>;
+    fn next(&mut self) -> Option<Self::Returns>;
     fn new_empty() -> Self;
 }
 
 // SAFETY: The length returned from iter_from_guards **must** be accurate as we rely on being able to call get_unchecked() if one iterator returns Some(_)
-pub unsafe trait Borrow<'b>: Sized {
+pub unsafe trait Borrow<'b>: Sized + 'static {
     type Of: 'static;
+    type Returns;
     type Iter: ExactSizeIterator;
 
     fn iter_from_guard<'guard: 'b>(guard: &'b mut RwLockEitherGuard<'guard>)
         -> (usize, Self::Iter);
 
-    fn borrow_from_iter<'a>(iter: &'a mut Self::Iter) -> Option<Self>;
+    fn borrow_from_iter<'a>(iter: &'a mut Self::Iter) -> Option<Self::Returns>;
 
-    unsafe fn borrow_from_iter_unchecked<'a>(iter: &'a mut Self::Iter) -> Self;
+    unsafe fn borrow_from_iter_unchecked<'a>(iter: &'a mut Self::Iter) -> Self::Returns;
 
     fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard>;
 
     fn iter_empty<'a>() -> Self::Iter;
 }
 
-unsafe impl<'b, T: 'static> Borrow<'b> for &'b T {
+unsafe impl<'b, T: 'static> Borrow<'b> for &'static T {
     type Of = T;
+    type Returns = &'b T;
     type Iter = Iter<'b, T>;
 
     fn iter_from_guard<'guard: 'b>(
@@ -222,13 +229,13 @@ unsafe impl<'b, T: 'static> Borrow<'b> for &'b T {
     }
 
     #[inline(always)]
-    fn borrow_from_iter<'a>(iter: &'a mut Self::Iter) -> Option<Self> {
+    fn borrow_from_iter<'a>(iter: &'a mut Self::Iter) -> Option<Self::Returns> {
         iter.next()
     }
 
     #[inline(always)]
     #[allow(unused_unsafe)]
-    unsafe fn borrow_from_iter_unchecked<'a>(iter: &'a mut Self::Iter) -> Self {
+    unsafe fn borrow_from_iter_unchecked<'a>(iter: &'a mut Self::Iter) -> Self::Returns {
         match iter.next() {
             Some(item) => return item,
             _ => unsafe { std::hint::unreachable_unchecked() },
@@ -243,8 +250,9 @@ unsafe impl<'b, T: 'static> Borrow<'b> for &'b T {
         [].iter()
     }
 }
-unsafe impl<'b, T: 'static> Borrow<'b> for &'b mut T {
+unsafe impl<'b, T: 'static> Borrow<'b> for &'static mut T {
     type Of = T;
+    type Returns = &'b mut T;
     type Iter = IterMut<'b, T>;
 
     fn iter_from_guard<'guard: 'b>(
@@ -260,13 +268,13 @@ unsafe impl<'b, T: 'static> Borrow<'b> for &'b mut T {
     }
 
     #[inline(always)]
-    fn borrow_from_iter<'a>(iter: &'a mut Self::Iter) -> Option<Self> {
+    fn borrow_from_iter<'a>(iter: &'a mut Self::Iter) -> Option<Self::Returns> {
         iter.next()
     }
 
     #[inline(always)]
     #[allow(unused_unsafe)]
-    unsafe fn borrow_from_iter_unchecked<'a>(iter: &'a mut Self::Iter) -> Self {
+    unsafe fn borrow_from_iter_unchecked<'a>(iter: &'a mut Self::Iter) -> Self::Returns {
         match iter.next() {
             Some(item) => item,
             None => unsafe { std::hint::unreachable_unchecked() },
@@ -279,6 +287,47 @@ unsafe impl<'b, T: 'static> Borrow<'b> for &'b mut T {
 
     fn iter_empty<'a>() -> Self::Iter {
         [].iter_mut()
+    }
+}
+
+pub struct EntityQuery;
+unsafe impl<'b> Borrow<'b> for EntityQuery {
+    type Of = Entity;
+    type Returns = Entity;
+    type Iter = std::iter::Copied<Iter<'b, Entity>>;
+
+    fn iter_from_guard<'guard: 'b>(
+        guard: &'b mut RwLockEitherGuard<'guard>,
+    ) -> (usize, Self::Iter) {
+        match guard {
+            RwLockEitherGuard::WriteGuard(guard) => {
+                let vec = guard.downcast_mut::<Vec<T>>().unwrap();
+                (vec.len(), vec.iter_mut())
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline(always)]
+    fn borrow_from_iter<'a>(iter: &'a mut Self::Iter) -> Option<Self::Returns> {
+        iter.next()
+    }
+
+    #[inline(always)]
+    #[allow(unused_unsafe)]
+    unsafe fn borrow_from_iter_unchecked<'a>(iter: &'a mut Self::Iter) -> Self::Returns {
+        match iter.next() {
+            Some(item) => item,
+            None => unsafe { std::hint::unreachable_unchecked() },
+        }
+    }
+
+    fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard> {
+        RwLockEitherGuard::WriteGuard(archetype.data.get_mut::<Vec<T>>().unwrap().guard)
+    }
+
+    fn iter_empty<'a>() -> Self::Iter {
+        [].iter().copied()
     }
 }
 
@@ -355,5 +404,24 @@ mod tests {
             .borrow()
             .into_for_each_mut(|(left,)| assert_eq!(*left, checks.next().unwrap()));
         assert!(checks.next().is_none());
+    }
+
+    #[test]
+    fn query_param_in_func() {
+        let mut world = World::new();
+        world.spawn((10_u32, 12_u64));
+        let query = world.query::<(&u32, &u64)>();
+
+        fn func(query: Query<(&u32, &u64)>) {
+            let mut ran = false;
+            query.borrow().into_for_each_mut(|(left, right)| {
+                assert!(*left == 10);
+                assert!(*right == 12);
+                ran = true;
+            });
+            assert!(ran);
+        }
+
+        func(query);
     }
 }

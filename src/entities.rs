@@ -29,7 +29,7 @@ pub struct Entities {
 }
 
 impl Entities {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             generations: Vec::with_capacity(4096),
             despawned: Vec::with_capacity(512),
