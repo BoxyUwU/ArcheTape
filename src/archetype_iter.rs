@@ -70,17 +70,12 @@ macro_rules! impl_query_infos {
 
         impl<'b, 'guard: 'b, $($x: Borrow<'b, 'guard>,)*> QueryBorrow<'b, 'guard, ($($x,)*), ($(<$x as Borrow<'b, 'guard>>::StorageBorrow,)*)> {
             pub fn into_for_each_mut<Func: FnMut(($($x::Returns,)*))>(&'b mut self, mut func: Func) {
-                let mut iterators = Vec::with_capacity(self.lock_guards.len());
-
                 for guards in self.lock_guards.iter_mut() {
                     let iter = <($(
                         $x::Iter,
                     )*) as Iters<($($x,)*)>>::iter_from_guards(guards);
                     let iter: ItersIterator<'b, 'guard, ($($x,)*), _> = ItersIterator::new(iter);
-                    iterators.push(iter);
-                }
 
-                for iter in iterators {
                     for item in iter {
                         func(item);
                     }
