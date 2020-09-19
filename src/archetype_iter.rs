@@ -23,41 +23,22 @@ impl<'a, T: QueryInfos + 'static> Query<'a, T> {
             phantom: PhantomData,
         }
     }
-
-    pub fn borrow(&self) -> QueryBorrow<'_, '_, T> {
-        let archetypes = self.world.query_archetypes::<T>();
-        let mut guards = Vec::with_capacity(16);
-
-        for archetype in archetypes.map(|idx| self.world.archetypes.get(idx).unwrap()) {
-            T::borrow_guards(&mut guards, archetype);
-        }
-
-        QueryBorrow {
-            lock_guards: guards,
-            phantom: PhantomData,
-            phantom2: PhantomData,
-        }
-    }
 }
 
-pub struct QueryBorrow<'b, 'guard, T: QueryInfos + 'static> {
-    lock_guards: Vec<RwLockEitherGuard<'guard>>,
-    phantom: PhantomData<T>,
-    phantom2: PhantomData<&'b ()>,
+pub struct QueryBorrow<'b, 'guard, T: QueryInfos + 'static, U: StorageBorrows<'b, T>> {
+    lock_guards: Vec<U>,
+    phantom: PhantomData<&'b T>,
+    phantom2: PhantomData<&'guard ()>,
 }
 
 pub trait QueryInfos: 'static {
     fn arity() -> usize;
     fn type_ids() -> Vec<TypeId>;
-    fn borrow_guards<'guard>(
-        guards: &mut Vec<RwLockEitherGuard<'guard>>,
-        archetype: &'guard Archetype,
-    );
 }
 
 macro_rules! impl_query_infos {
     ($($x:ident)*) => {
-        impl<'b, $($x: Borrow<'b>,)*> QueryInfos for ($($x,)*) {
+        impl<'b, 'guard: 'b, $($x: Borrow<'b, 'guard>,)*> QueryInfos for ($($x,)*) {
             #[allow(unused, non_snake_case)]
             fn arity() -> usize {
                 let mut count = 0;
@@ -69,28 +50,45 @@ macro_rules! impl_query_infos {
             }
 
             fn type_ids() -> Vec<TypeId> {
-                vec![$(TypeId::of::<$x::Of>(),)*]
-            }
-
-            fn borrow_guards<'guard>(guards: &mut Vec<RwLockEitherGuard<'guard>>, archetype: &'guard Archetype) {
-                $(
-                    guards.push($x::guards_from_archetype(archetype));
-                )*
+                let vec = vec![$($x::type_id(),)*];
+                vec.into_iter().filter_map(|id| if let Some(id) = id { Some(id) } else { None } ).collect()
             }
         }
 
-        impl<'g: 'b, 'b, $($x: Borrow<'b>,)*> QueryBorrow<'b, 'g, ($($x,)*)> {
-            pub fn into_for_each_mut<Func: FnMut(($($x::Returns,)*))>(&'b mut self, mut func: Func) {
-                let arity = <($($x,)*) as QueryInfos>::arity();
-                debug_assert!(self.lock_guards.len() % arity == 0);
+        impl<'a, 'guard: 'a, $($x: Borrow<'a, 'guard>,)*> Query<'a, ($($x,)*)> {
+            pub fn borrow<'this: 'guard>(&'this self) -> QueryBorrow<'a, 'guard, ($($x,)*), ($($x::StorageBorrow,)*)> {
+                let archetypes = self.world.query_archetypes::<($($x,)*)>();
+                let mut guards: Vec<($($x::StorageBorrow,)*)> = Vec::with_capacity(16);
 
+                for archetype in archetypes.map(|idx| self.world.archetypes.get(idx).unwrap()) {
+                    <Query<($($x,)*)>>::borrow_guards(&mut guards, archetype);
+                }
+
+                QueryBorrow {
+                    lock_guards: guards,
+                    phantom: PhantomData,
+                    phantom2: PhantomData,
+                }
+            }
+
+            pub fn borrow_guards(all_guards: &mut Vec<($($x::StorageBorrow,)*)>, archetype: &'guard Archetype) {
+                all_guards.push(
+                    ($(
+                        <$x as Borrow<'a, 'guard>>::guards_from_archetype(archetype),
+                    )*)
+                );
+            }
+        }
+
+        impl<'b, 'guard: 'b, $($x: Borrow<'b, 'guard>,)*> QueryBorrow<'b, 'guard, ($($x,)*), ($(<$x as Borrow<'b, 'guard>>::StorageBorrow,)*)> {
+            pub fn into_for_each_mut<Func: FnMut(($($x::Returns,)*))>(&'b mut self, mut func: Func) {
                 let mut iterators = Vec::with_capacity(self.lock_guards.len());
 
-                for chunk in self.lock_guards.chunks_mut(arity) {
+                for guards in self.lock_guards.iter_mut() {
                     let iter = <($(
                         $x::Iter,
-                    )*) as Iters<($($x,)*)>>::iter_from_guards(chunk);
-                    let iter: ItersIterator<'_, ($($x,)*), _> = ItersIterator::new(iter);
+                    )*) as Iters<($($x,)*)>>::iter_from_guards(guards);
+                    let iter: ItersIterator<'b, 'guard, ($($x,)*), _> = ItersIterator::new(iter);
                     iterators.push(iter);
                 }
 
@@ -102,17 +100,20 @@ macro_rules! impl_query_infos {
             }
         }
 
-        impl<'a, $($x: Borrow<'a>,)*> Iters<'a, ($($x,)*)> for ($(<$x as Borrow<'a>>::Iter,)*) {
+        impl<'a, 'guard: 'a, $($x: Borrow<'a, 'guard>,)*> Iters<'a, 'guard, ($($x,)*)> for ($(<$x as Borrow<'a, 'guard>>::Iter,)*) {
             type Returns = ($($x::Returns,)*);
+            type StorageBorrows = ($($x::StorageBorrow,)*);
 
-            fn iter_from_guards<'guard: 'a>(locks: &'a mut [RwLockEitherGuard<'guard>]) -> Self {
-                let mut iter = locks.iter_mut();
+            #[allow(non_snake_case)]
+            fn iter_from_guards(locks: &'a mut Self::StorageBorrows) -> Self {
+                let ($(
+                    $x,
+                )*) = locks;
                 let mut length = None;
 
                 ($(
                     {
-                        let guard = iter.next().unwrap();
-                        let (len, iter) = <$x as Borrow<'a>>::iter_from_guard(guard);
+                        let (len, iter) = $x::iter_from_guard($x);
 
                         // SAFETY, it's important that all iterators are the same length so that we can get_unchecked if the first iterator return Some()
                         if length.is_none() {
@@ -137,17 +138,19 @@ macro_rules! impl_query_infos {
                     // Because the length of all the iterators in Iters must be the same this means all the other iterators must return Some(_) too.
                     // See Iters::iter_from_guards
                     return Some(($(
-                        unsafe { <$x as Borrow<'a>>::borrow_from_iter_unchecked($x) },
+                        unsafe { <$x as Borrow<'a, 'guard>>::borrow_from_iter_unchecked($x) },
                     )*));
                 }
             }
 
             fn new_empty() -> Self {
                 ($(
-                    <$x as Borrow<'a>>::iter_empty(),
+                    <$x as Borrow<'a, 'guard>>::iter_empty(),
                 )*)
             }
         }
+
+        impl<'a, 'guard: 'a, $($x: Borrow<'a, 'guard>,)*> StorageBorrows<'a, ($($x,)*)> for ($($x::StorageBorrow,)*) {}
     };
 }
 
@@ -162,12 +165,15 @@ impl_query_infos!(A B C);
 impl_query_infos!(A B);
 impl_query_infos!(A);
 
-pub struct ItersIterator<'a, U: QueryInfos + 'static, T: Iters<'a, U>> {
+pub struct ItersIterator<'a, 'guard: 'a, U: QueryInfos + 'static, T: Iters<'a, 'guard, U>> {
     iter: T,
     phantom: PhantomData<&'a U>,
+    phantom2: PhantomData<&'guard T::StorageBorrows>,
 }
 
-impl<'a, U: QueryInfos + 'static, T: Iters<'a, U>> Iterator for ItersIterator<'a, U, T> {
+impl<'a, 'guard: 'a, U: QueryInfos + 'static, T: Iters<'a, 'guard, U>> Iterator
+    for ItersIterator<'a, 'guard, U, T>
+{
     type Item = T::Returns;
 
     #[inline(always)]
@@ -176,56 +182,59 @@ impl<'a, U: QueryInfos + 'static, T: Iters<'a, U>> Iterator for ItersIterator<'a
     }
 }
 
-impl<'a, U: QueryInfos + 'static, T: Iters<'a, U>> ItersIterator<'a, U, T> {
+impl<'a, 'guard: 'a, U: QueryInfos + 'static, T: Iters<'a, 'guard, U>>
+    ItersIterator<'a, 'guard, U, T>
+{
     pub fn new(iter: T) -> Self {
         Self {
             iter,
             phantom: PhantomData,
+            phantom2: PhantomData,
         }
     }
 }
 
-pub trait Iters<'a, T: QueryInfos + 'static> {
+pub trait Iters<'a, 'guard: 'a, T: QueryInfos + 'static> {
     type Returns;
+    type StorageBorrows: 'guard;
 
-    fn iter_from_guards<'guard: 'a>(locks: &'a mut [RwLockEitherGuard<'guard>]) -> Self;
+    fn iter_from_guards(locks: &'a mut Self::StorageBorrows) -> Self;
     fn next(&mut self) -> Option<Self::Returns>;
     fn new_empty() -> Self;
 }
 
-// SAFETY: The length returned from iter_from_guards **must** be accurate as we rely on being able to call get_unchecked() if one iterator returns Some(_)
-pub unsafe trait Borrow<'b>: Sized + 'static {
-    type Of: 'static;
-    type Returns;
-    type Iter: ExactSizeIterator;
+pub trait StorageBorrows<'guard, T: QueryInfos + 'static> {}
 
-    fn iter_from_guard<'guard: 'b>(guard: &'b mut RwLockEitherGuard<'guard>)
-        -> (usize, Self::Iter);
+// SAFETY: The length returned from iter_from_guards **must** be accurate as we rely on being able to call get_unchecked() if one iterator returns Some(_)
+pub unsafe trait Borrow<'b, 'guard: 'b>: Sized + 'static {
+    type Of: 'static;
+    type Returns: 'b;
+    type Iter: ExactSizeIterator + 'b;
+    type StorageBorrow: 'guard;
+
+    fn iter_from_guard(guard: &'b mut Self::StorageBorrow) -> (usize, Self::Iter);
 
     fn borrow_from_iter<'a>(iter: &'a mut Self::Iter) -> Option<Self::Returns>;
 
     unsafe fn borrow_from_iter_unchecked<'a>(iter: &'a mut Self::Iter) -> Self::Returns;
 
-    fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard>;
+    fn guards_from_archetype(archetype: &'guard Archetype) -> Self::StorageBorrow;
 
     fn iter_empty<'a>() -> Self::Iter;
+
+    /// Returning None allows for the Query to be skipped when checking if an archetype matches
+    fn type_id() -> Option<TypeId>;
 }
 
-unsafe impl<'b, T: 'static> Borrow<'b> for &'static T {
+unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
     type Of = T;
     type Returns = &'b T;
     type Iter = Iter<'b, T>;
+    type StorageBorrow = RwLockReadGuard<'guard, Box<dyn Any>>;
 
-    fn iter_from_guard<'guard: 'b>(
-        guard: &'b mut RwLockEitherGuard<'guard>,
-    ) -> (usize, Self::Iter) {
-        match guard {
-            RwLockEitherGuard::ReadGuard(guard) => {
-                let vec = guard.downcast_ref::<Vec<T>>().unwrap();
-                (vec.len(), vec.iter())
-            }
-            _ => unreachable!(),
-        }
+    fn iter_from_guard(guard: &'b mut Self::StorageBorrow) -> (usize, Self::Iter) {
+        let vec = guard.downcast_ref::<Vec<T>>().unwrap();
+        (vec.len(), vec.iter())
     }
 
     #[inline(always)]
@@ -242,29 +251,27 @@ unsafe impl<'b, T: 'static> Borrow<'b> for &'static T {
         }
     }
 
-    fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard> {
-        RwLockEitherGuard::ReadGuard(archetype.data.get::<Vec<T>>().unwrap().guard)
+    fn guards_from_archetype(archetype: &'guard Archetype) -> Self::StorageBorrow {
+        archetype.data.get::<Vec<T>>().unwrap().guard
     }
 
     fn iter_empty<'a>() -> Self::Iter {
         [].iter()
     }
+
+    fn type_id() -> Option<TypeId> {
+        Some(TypeId::of::<T>())
+    }
 }
-unsafe impl<'b, T: 'static> Borrow<'b> for &'static mut T {
+unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
     type Of = T;
     type Returns = &'b mut T;
     type Iter = IterMut<'b, T>;
+    type StorageBorrow = RwLockWriteGuard<'guard, Box<dyn Any>>;
 
-    fn iter_from_guard<'guard: 'b>(
-        guard: &'b mut RwLockEitherGuard<'guard>,
-    ) -> (usize, Self::Iter) {
-        match guard {
-            RwLockEitherGuard::WriteGuard(guard) => {
-                let vec = guard.downcast_mut::<Vec<T>>().unwrap();
-                (vec.len(), vec.iter_mut())
-            }
-            _ => unreachable!(),
-        }
+    fn iter_from_guard(guard: &'b mut Self::StorageBorrow) -> (usize, Self::Iter) {
+        let vec = guard.downcast_mut::<Vec<T>>().unwrap();
+        (vec.len(), vec.iter_mut())
     }
 
     #[inline(always)]
@@ -281,31 +288,27 @@ unsafe impl<'b, T: 'static> Borrow<'b> for &'static mut T {
         }
     }
 
-    fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard> {
-        RwLockEitherGuard::WriteGuard(archetype.data.get_mut::<Vec<T>>().unwrap().guard)
+    fn guards_from_archetype(archetype: &'guard Archetype) -> Self::StorageBorrow {
+        archetype.data.get_mut::<Vec<T>>().unwrap().guard
     }
 
     fn iter_empty<'a>() -> Self::Iter {
         [].iter_mut()
     }
+
+    fn type_id() -> Option<TypeId> {
+        Some(TypeId::of::<T>())
+    }
 }
 
-pub struct EntityQuery;
-unsafe impl<'b> Borrow<'b> for EntityQuery {
+unsafe impl<'b, 'guard: 'b> Borrow<'b, 'guard> for Entities {
     type Of = Entity;
     type Returns = Entity;
     type Iter = std::iter::Copied<Iter<'b, Entity>>;
+    type StorageBorrow = &'guard Vec<Entity>;
 
-    fn iter_from_guard<'guard: 'b>(
-        guard: &'b mut RwLockEitherGuard<'guard>,
-    ) -> (usize, Self::Iter) {
-        match guard {
-            RwLockEitherGuard::WriteGuard(guard) => {
-                let vec = guard.downcast_mut::<Vec<T>>().unwrap();
-                (vec.len(), vec.iter_mut())
-            }
-            _ => unreachable!(),
-        }
+    fn iter_from_guard(guard: &'b mut Self::StorageBorrow) -> (usize, Self::Iter) {
+        (guard.len(), guard.iter().copied())
     }
 
     #[inline(always)]
@@ -322,12 +325,16 @@ unsafe impl<'b> Borrow<'b> for EntityQuery {
         }
     }
 
-    fn guards_from_archetype<'guard>(archetype: &'guard Archetype) -> RwLockEitherGuard<'guard> {
-        RwLockEitherGuard::WriteGuard(archetype.data.get_mut::<Vec<T>>().unwrap().guard)
+    fn guards_from_archetype(archetype: &'guard Archetype) -> Self::StorageBorrow {
+        &archetype.entities
     }
 
     fn iter_empty<'a>() -> Self::Iter {
         [].iter().copied()
+    }
+
+    fn type_id() -> Option<TypeId> {
+        None
     }
 }
 
@@ -423,5 +430,19 @@ mod tests {
         }
 
         func(query);
+    }
+
+    #[test]
+    fn entity_query() {
+        let mut world = World::new();
+        world.spawn((1_u32, 12_u64));
+
+        let query = world.query::<(Entities, &u32, &u64)>();
+
+        let mut checks = vec![(Entity::new(0, 0), 1, 12)].into_iter();
+        query.borrow().into_for_each_mut(|(entity, left, right)| {
+            assert!(checks.next().unwrap() == (entity, *left, *right));
+        });
+        assert!(checks.next().is_none());
     }
 }
