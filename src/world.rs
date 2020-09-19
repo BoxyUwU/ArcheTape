@@ -82,9 +82,14 @@ impl World {
             .iter()
             .enumerate()
             .filter(|(_, archetype)| {
-                T::type_ids()
-                    .iter()
-                    .all(|id| archetype.type_ids.contains(id))
+                T::type_ids().iter().all(|id| {
+                    if let Some(id) = id {
+                        archetype.type_ids.contains(id)
+                    } else {
+                        // If id is none then the id should be skipped
+                        true
+                    }
+                })
             })
             .map(|(n, _)| n)
     }

@@ -32,26 +32,14 @@ pub struct QueryBorrow<'b, 'guard, T: QueryInfos + 'static, U: StorageBorrows<'b
 }
 
 pub trait QueryInfos: 'static {
-    fn arity() -> usize;
-    fn type_ids() -> Vec<TypeId>;
+    fn type_ids() -> Vec<Option<TypeId>>;
 }
 
 macro_rules! impl_query_infos {
     ($($x:ident)*) => {
         impl<'b, 'guard: 'b, $($x: Borrow<'b, 'guard>,)*> QueryInfos for ($($x,)*) {
-            #[allow(unused, non_snake_case)]
-            fn arity() -> usize {
-                let mut count = 0;
-                $(
-                    let $x = ();
-                    count += 1;
-                )*
-                count
-            }
-
-            fn type_ids() -> Vec<TypeId> {
-                let vec = vec![$($x::type_id(),)*];
-                vec.into_iter().filter_map(|id| if let Some(id) = id { Some(id) } else { None } ).collect()
+            fn type_ids() -> Vec<Option<TypeId>> {
+                vec![$($x::type_id(),)*]
             }
         }
 
@@ -222,7 +210,7 @@ pub unsafe trait Borrow<'b, 'guard: 'b>: Sized + 'static {
 
     fn iter_empty<'a>() -> Self::Iter;
 
-    /// Returning None allows for the Query to be skipped when checking if an archetype matches
+    /// Returning None allows for this Borrow to be skipped when checking if an archetype contains Self::Of
     fn type_id() -> Option<TypeId>;
 }
 
@@ -260,7 +248,7 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
     }
 
     fn type_id() -> Option<TypeId> {
-        Some(TypeId::of::<T>())
+        Some(TypeId::of::<Self::Of>())
     }
 }
 unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
@@ -297,7 +285,7 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
     }
 
     fn type_id() -> Option<TypeId> {
-        Some(TypeId::of::<T>())
+        Some(TypeId::of::<Self::Of>())
     }
 }
 
