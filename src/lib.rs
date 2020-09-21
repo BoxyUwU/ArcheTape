@@ -5,4 +5,5 @@ pub mod archetype_iter;
 pub mod bundle;
 pub mod entities;
 pub mod lifetime_anymap;
+pub mod untyped_vec;
 pub mod world;
