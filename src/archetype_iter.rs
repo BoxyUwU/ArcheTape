@@ -69,7 +69,20 @@ macro_rules! impl_query_infos {
         }
 
         impl<'b, 'guard: 'b, $($x: Borrow<'b, 'guard>,)*> QueryBorrow<'b, 'guard, ($($x,)*), ($(<$x as Borrow<'b, 'guard>>::StorageBorrow,)*)> {
-            pub fn into_for_each_mut<Func: FnMut(($($x::Returns,)*))>(&'b mut self, mut func: Func) {
+            pub fn for_each_mut<Func: FnMut(($($x::Returns,)*))>(&'b mut self, mut func: Func) {
+                for guards in self.lock_guards.iter_mut() {
+                    let iter = <($(
+                        $x::Iter,
+                    )*) as Iters<($($x,)*)>>::iter_from_guards(guards);
+                    let iter: ItersIterator<'b, 'guard, ($($x,)*), _> = ItersIterator::new(iter);
+
+                    for item in iter {
+                        func(item);
+                    }
+                }
+            }
+
+            pub fn for_each<Func: Fn(($($x::Returns,)*))>(&'b mut self, func: Func) {
                 for guards in self.lock_guards.iter_mut() {
                     let iter = <($(
                         $x::Iter,
@@ -335,7 +348,7 @@ mod tests {
 
         let query = world.query::<(&mut u32, &u64)>();
         let mut checks = vec![(10, 12), (15, 14), (20, 16)].into_iter();
-        query.borrow().into_for_each_mut(|(left, right)| {
+        query.borrow().for_each_mut(|(left, right)| {
             assert_eq!(checks.next().unwrap(), (*left, *right));
         });
         assert_eq!(checks.next(), None);
@@ -354,7 +367,7 @@ mod tests {
         let mut checks = vec![(10, 12), (15, 14), (20, 16)].into_iter();
         query
             .borrow()
-            .into_for_each_mut(|(left, right)| assert_eq!((*left, *right), checks.next().unwrap()));
+            .for_each_mut(|(left, right)| assert_eq!((*left, *right), checks.next().unwrap()));
         assert!(checks.next().is_none());
     }
 
@@ -371,7 +384,7 @@ mod tests {
         let mut checks = vec![10, 15, 20].into_iter();
         query
             .borrow()
-            .into_for_each_mut(|(left,)| assert_eq!(*left, checks.next().unwrap()));
+            .for_each_mut(|(left,)| assert_eq!(*left, checks.next().unwrap()));
         assert!(checks.next().is_none());
     }
 
@@ -392,7 +405,7 @@ mod tests {
         let mut checks = vec![10, 15, 20, 11, 16, 21].into_iter();
         query
             .borrow()
-            .into_for_each_mut(|(left,)| assert_eq!(*left, checks.next().unwrap()));
+            .for_each_mut(|(left,)| assert_eq!(*left, checks.next().unwrap()));
         assert!(checks.next().is_none());
     }
 
@@ -404,7 +417,7 @@ mod tests {
 
         fn func(query: Query<(&u32, &u64)>) {
             let mut ran = false;
-            query.borrow().into_for_each_mut(|(left, right)| {
+            query.borrow().for_each_mut(|(left, right)| {
                 assert!(*left == 10);
                 assert!(*right == 12);
                 ran = true;
@@ -423,7 +436,7 @@ mod tests {
         let query = world.query::<(Entities, &u32, &u64)>();
 
         let mut checks = vec![(Entity::new(0, 0), 1, 12)].into_iter();
-        query.borrow().into_for_each_mut(|(entity, left, right)| {
+        query.borrow().for_each_mut(|(entity, left, right)| {
             assert!(checks.next().unwrap() == (entity, *left, *right));
         });
         assert!(checks.next().is_none());

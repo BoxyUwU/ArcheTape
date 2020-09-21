@@ -9,7 +9,7 @@ macro_rules! setup {
             )*
 
             $(
-                for _ in 0..20 {
+                for _ in 0..2000 {
                     $world.spawn(($x(0.), Data(1.)));
                 }
             )*
@@ -21,11 +21,8 @@ fn main() {
     setup!(world, A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z);
 
     for _ in 0..10_000_000 {
-        world
-            .query::<(&mut Data,)>()
-            .borrow()
-            .into_for_each_mut(|(data,)| {
-                data.0 *= 2.;
-            });
+        world.query::<(&mut Data,)>().borrow().for_each(|(data,)| {
+            data.0 *= 2.;
+        });
     }
 }
