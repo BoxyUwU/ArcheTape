@@ -1,4 +1,5 @@
 use super::entities::Entity;
+use super::sparse_array::SparseArray;
 use super::world::Archetype;
 use std::any::TypeId;
 
@@ -42,6 +43,7 @@ macro_rules! impl_bundle {
                 )*
 
                 Archetype {
+                    sparse: SparseArray::new(),
                     lookup: hashmap,
                     component_storages,
                     entities: Vec::new(),

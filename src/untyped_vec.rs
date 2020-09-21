@@ -160,17 +160,17 @@ impl UntypedVec {
         }
     }
 
-    pub fn move_element_to_other_vec(&mut self, other: &mut UntypedVec, byte_index: usize) {
+    pub fn move_element_to_other_vec(&mut self, other: &mut UntypedVec, element: usize) {
         assert!(self.type_info == other.type_info);
-        assert!(byte_index % self.type_info.layout.align() == 0);
         assert!(self.len > 0);
-        assert!(byte_index <= self.len - self.type_info.layout.size());
+        assert!(element < self.len / self.type_info.layout.size());
 
         let data: *mut MaybeUninit<u8> = self.data.as_ptr() as *mut MaybeUninit<u8>;
 
-        if byte_index == self.len - self.type_info.layout.size() {
+        //if byte_index == self.len - self.type_info.layout.size() {
+        if element == self.len / self.type_info.layout.size() - 1 {
             // Safe because we're offsetting inside the allocation and len is never >= isize::MAX
-            let to_move = unsafe { data.offset(byte_index as isize) };
+            let to_move = unsafe { data.offset((element * self.type_info.layout.size()) as isize) };
 
             unsafe {
                 // Safe because we assert that the type_info for self and other are the same.
@@ -181,8 +181,11 @@ impl UntypedVec {
             self.len -= self.type_info.layout.size();
         } else {
             // Safe because we're offsetting inside the allocation and len is never >= isize::MAX
-            let to_move = unsafe { data.offset(byte_index as isize) };
-            let to_swap = unsafe { data.offset(-(self.type_info.layout.size() as isize)) };
+            let to_move = unsafe { data.offset((element * self.type_info.layout.size()) as isize) };
+            let to_swap = unsafe {
+                data.offset(self.len as isize)
+                    .offset(-(self.type_info.layout.size() as isize))
+            };
 
             unsafe {
                 // Safe because moving the last entry in the vec happens in the other branch
@@ -197,6 +200,31 @@ impl UntypedVec {
             }
 
             self.len -= self.type_info.layout.size();
+        }
+    }
+
+    pub fn remove(&mut self, element: usize) {
+        assert!(self.len > 0);
+        assert!(element < self.len / self.type_info.layout.size());
+
+        let data = self.data.as_ptr() as *mut MaybeUninit<u8>;
+
+        if element == self.len / self.type_info.layout.size() - 1 {
+            self.pop();
+        } else {
+            // Safe because we're offsetting inside the allocation and len is never >= isize::MAX
+            let to_move = unsafe { data.offset((element * self.type_info.layout.size()) as isize) };
+            let to_swap = unsafe {
+                data.offset(self.len as isize)
+                    .offset(-(self.type_info.layout.size() as isize))
+            };
+
+            unsafe {
+                // Safe because moving the last entry in the vec happens in the other branch
+                std::ptr::swap_nonoverlapping(to_move, to_swap, self.type_info.layout.size());
+            }
+
+            self.pop();
         }
     }
 
@@ -496,7 +524,7 @@ mod tests {
 
         let mut untyped_vec_2 = UntypedVec::new::<Wrap>();
 
-        untyped_vec_1.move_element_to_other_vec(&mut untyped_vec_2, std::mem::size_of::<Wrap>());
+        untyped_vec_1.move_element_to_other_vec(&mut untyped_vec_2, 1);
 
         assert!(dropped_1 == false);
         assert!(dropped_2 == false);
@@ -506,5 +534,33 @@ mod tests {
         assert!(untyped_vec_2.len == std::mem::size_of::<Wrap>());
         assert!(untyped_vec_2.cap == std::mem::size_of::<Wrap>() * 4);
         assert!(untyped_vec_2.as_slice::<Wrap>()[0].0 == 12);
+    }
+
+    #[test]
+    pub fn remove() {
+        let mut dropped = false;
+        pub struct Wrap(u32, *mut bool);
+        impl Drop for Wrap {
+            fn drop(&mut self) {
+                unsafe { *self.1 = true };
+            }
+        }
+
+        let mut untyped_vec = UntypedVec::new::<Wrap>();
+        unsafe {
+            let data = Wrap(10, &mut dropped as *mut bool);
+
+            untyped_vec.push_raw(
+                &data as *const Wrap as *const MaybeUninit<u8>,
+                TypeInfo::new::<Wrap>(),
+            );
+
+            std::mem::forget(data);
+        }
+
+        untyped_vec.remove(0);
+
+        assert!(dropped == true);
+        assert!(untyped_vec.len == 0);
     }
 }

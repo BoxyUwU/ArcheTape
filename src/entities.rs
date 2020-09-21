@@ -203,19 +203,14 @@ mod tests {
     pub fn generation_wraps() {
         let mut entities = Entities::new();
 
-        for n in 0..=u16::MAX {
-            let entity = entities.spawn();
-            entities.despawn(entity);
-
-            assert!(entity == Entity::new(0, n));
-            assert!(entities.is_alive(entity) == false);
-            assert!(entities.generations.len() == 1);
-            assert!(*entities.generations.get(0).unwrap() == n.wrapping_add(1));
-            assert!(entities.despawned.len() == 1);
-            assert!(*entities.despawned.get(0).unwrap() == 0);
-        }
+        entities.generations.push(u16::MAX);
+        entities.despawned.push(0);
 
         let entity = entities.spawn();
+        entities.despawn(entity);
+
+        let entity = entities.spawn();
+
         assert!(entities.is_alive(entity));
         assert!(entity == Entity(0));
         assert!(entities.generations.len() == 1);

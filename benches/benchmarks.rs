@@ -101,7 +101,7 @@ pub mod simple_iter {
                     Position(Vector3::unit_x()),
                     Rotation(Vector3::unit_x()),
                     Velocity(Vector3::unit_x()),
-                ))
+                ));
             }
 
             Benchmark(world)
@@ -147,7 +147,7 @@ pub mod simple_insert {
                     Position(Vector3::unit_x()),
                     Rotation(Vector3::unit_x()),
                     Velocity(Vector3::unit_x()),
-                ))
+                ));
             }
         }
     }
