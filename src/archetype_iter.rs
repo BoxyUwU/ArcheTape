@@ -1,4 +1,5 @@
 use super::entities::{Entities, Entity};
+use super::untyped_vec::UntypedVec;
 use super::world::{Archetype, World};
 use std::any::{Any, TypeId};
 use std::marker::PhantomData;
@@ -226,11 +227,11 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
     type Of = T;
     type Returns = &'b T;
     type Iter = Iter<'b, T>;
-    type StorageBorrow = RwLockReadGuard<'guard, Box<dyn Any>>;
+    type StorageBorrow = RwLockReadGuard<'guard, UntypedVec>;
 
     fn iter_from_guard(guard: &'b mut Self::StorageBorrow) -> (usize, Self::Iter) {
-        let vec = guard.downcast_ref::<Vec<T>>().unwrap();
-        (vec.len(), vec.iter())
+        let slice = guard.as_slice::<T>();
+        (slice.len(), slice.iter())
     }
 
     #[inline(always)]
@@ -248,7 +249,8 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
     }
 
     fn guards_from_archetype(archetype: &'guard Archetype) -> Self::StorageBorrow {
-        archetype.data.get::<Vec<T>>().unwrap().guard
+        let idx = archetype.lookup[&TypeId::of::<T>()];
+        archetype.component_storages[idx].read().unwrap()
     }
 
     fn iter_empty<'a>() -> Self::Iter {
@@ -263,11 +265,11 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
     type Of = T;
     type Returns = &'b mut T;
     type Iter = IterMut<'b, T>;
-    type StorageBorrow = RwLockWriteGuard<'guard, Box<dyn Any>>;
+    type StorageBorrow = RwLockWriteGuard<'guard, UntypedVec>;
 
     fn iter_from_guard(guard: &'b mut Self::StorageBorrow) -> (usize, Self::Iter) {
-        let vec = guard.downcast_mut::<Vec<T>>().unwrap();
-        (vec.len(), vec.iter_mut())
+        let slice = guard.as_slice_mut::<T>();
+        (slice.len(), slice.iter_mut())
     }
 
     #[inline(always)]
@@ -285,7 +287,8 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
     }
 
     fn guards_from_archetype(archetype: &'guard Archetype) -> Self::StorageBorrow {
-        archetype.data.get_mut::<Vec<T>>().unwrap().guard
+        let idx = archetype.lookup[&TypeId::of::<T>()];
+        archetype.component_storages[idx].write().unwrap()
     }
 
     fn iter_empty<'a>() -> Self::Iter {

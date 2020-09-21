@@ -3,13 +3,17 @@ use super::archetype_iter::{Query, QueryInfos};
 use super::bundle::Bundle;
 use super::entities::{Entities, Entity};
 use super::lifetime_anymap::{LifetimeAnyMap, LifetimeAnyMapBorrow, LifetimeAnyMapBorrowMut};
+use super::untyped_vec::UntypedVec;
 use std::any::TypeId;
+use std::collections::HashMap;
 use std::error::Error;
+use std::sync::RwLock;
 
 pub struct Archetype {
+    pub lookup: HashMap<TypeId, usize, crate::anymap::TypeIdHasherBuilder>,
     pub type_ids: Vec<TypeId>,
     pub entities: Vec<Entity>,
-    pub data: AnyMap,
+    pub component_storages: Vec<RwLock<UntypedVec>>,
 }
 
 impl Archetype {
@@ -17,8 +21,8 @@ impl Archetype {
         T::new_archetype()
     }
 
-    pub fn add<T: Bundle>(&mut self, components: T, entity: Entity) -> Result<(), Box<dyn Error>> {
-        components.add_to_archetype(self, entity)
+    pub fn add<T: Bundle>(&mut self, components: T, entity: Entity) {
+        components.add_to_archetype(self, entity);
     }
 }
 
@@ -102,8 +106,7 @@ impl World {
         self.archetypes
             .get_mut(archetype_idx)
             .unwrap()
-            .add(bundle, entity)
-            .unwrap();
+            .add(bundle, entity);
     }
 
     pub fn run(&mut self) -> RunWorldContext {
