@@ -7,7 +7,7 @@ use std::{
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct TypeInfo {
-    id: TypeId,
+    pub id: TypeId,
     layout: Layout,
 }
 
@@ -46,6 +46,11 @@ impl UntypedVec {
         unsafe { Self::new_from_raw(type_info, Some(drop_fn)) }
     }
 
+    pub fn new_from_untyped_vec(from: &mut UntypedVec) -> Self {
+        // Safe because the passed in untyped vec was either made safely or with unsafe code
+        unsafe { Self::new_from_raw(from.type_info, from.drop_fn) }
+    }
+
     /// Safety: drop_fn must take a pointer to a MaybeUninit<u8> and call the `Drop` impl of the type that TypeInfo corresponds to.
     /// If your type doesnt have a Drop trait implementaton then this can just be None.
     pub unsafe fn new_from_raw(
@@ -61,6 +66,15 @@ impl UntypedVec {
             len: 0,
             drop_fn,
         }
+    }
+
+    pub fn get_type_info(&self) -> TypeInfo {
+        self.type_info
+    }
+
+    pub fn len(&self) -> usize {
+        assert!(self.len % self.type_info.layout.size() == 0);
+        self.len / self.type_info.layout.size()
     }
 
     pub fn realloc(&mut self) {
@@ -160,7 +174,7 @@ impl UntypedVec {
         }
     }
 
-    pub fn move_element_to_other_vec(&mut self, other: &mut UntypedVec, element: usize) {
+    pub fn swap_move_element_to_other_vec(&mut self, other: &mut UntypedVec, element: usize) {
         assert!(self.type_info == other.type_info);
         assert!(self.len > 0);
         assert!(element < self.len / self.type_info.layout.size());
@@ -203,7 +217,7 @@ impl UntypedVec {
         }
     }
 
-    pub fn remove(&mut self, element: usize) {
+    pub fn swap_remove(&mut self, element: usize) {
         assert!(self.len > 0);
         assert!(element < self.len / self.type_info.layout.size());
 
@@ -479,7 +493,7 @@ mod tests {
 
         let mut untyped_vec_2 = UntypedVec::new::<Wrap>();
 
-        untyped_vec_1.move_element_to_other_vec(&mut untyped_vec_2, 0);
+        untyped_vec_1.swap_move_element_to_other_vec(&mut untyped_vec_2, 0);
 
         assert!(dropped == false);
         assert!(untyped_vec_1.len == 0);
@@ -524,7 +538,7 @@ mod tests {
 
         let mut untyped_vec_2 = UntypedVec::new::<Wrap>();
 
-        untyped_vec_1.move_element_to_other_vec(&mut untyped_vec_2, 1);
+        untyped_vec_1.swap_move_element_to_other_vec(&mut untyped_vec_2, 1);
 
         assert!(dropped_1 == false);
         assert!(dropped_2 == false);
@@ -558,7 +572,7 @@ mod tests {
             std::mem::forget(data);
         }
 
-        untyped_vec.remove(0);
+        untyped_vec.swap_remove(0);
 
         assert!(dropped == true);
         assert!(untyped_vec.len == 0);

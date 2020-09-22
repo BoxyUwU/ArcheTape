@@ -27,16 +27,36 @@ impl Archetype {
         T::new_archetype()
     }
 
-    pub fn add<T: Bundle>(&mut self, components: T, entity: Entity) {
+    pub fn from_archetype(from: &mut Archetype) -> Archetype {
+        Archetype {
+            sparse: SparseArray::new(),
+
+            lookup: from.lookup.clone(),
+            type_ids: from.type_ids.clone(),
+
+            entities: Vec::new(),
+            component_storages: {
+                let mut storages = Vec::with_capacity(from.component_storages.len());
+                for storage in from.component_storages.iter_mut() {
+                    let untyped_vec = UntypedVec::new_from_untyped_vec(storage.get_mut().unwrap());
+                    let lock = RwLock::new(untyped_vec);
+                    storages.push(lock);
+                }
+                storages
+            },
+        }
+    }
+
+    pub fn spawn<T: Bundle>(&mut self, components: T, entity: Entity) {
         components.add_to_archetype(self, entity);
     }
 
     pub fn despawn(&mut self, entity: Entity) -> bool {
-        if let Some(&idx) = self.sparse.get(entity.uindex()) {
+        if let Some(idx) = self.sparse.remove(entity.uindex()) {
             self.entities.remove(idx);
             for lock in self.component_storages.iter_mut() {
                 let storage = lock.get_mut().unwrap();
-                storage.remove(idx);
+                storage.swap_remove(idx);
             }
         }
         false
@@ -89,9 +109,7 @@ impl World {
         Query::<T>::new(self)
     }
 
-    pub fn find_archetype<T: Bundle>(&mut self, type_ids: &[TypeId]) -> Option<usize> {
-        debug_assert!(T::type_ids() == type_ids);
-
+    pub fn find_archetype(&mut self, type_ids: &[TypeId]) -> Option<usize> {
         for (cached_type_id, archetype) in self.cache.iter() {
             if *cached_type_id == type_ids {
                 return Some(*archetype);
@@ -116,7 +134,7 @@ impl World {
     pub fn find_archetype_or_insert<T: Bundle>(&mut self, type_ids: &[TypeId]) -> usize {
         debug_assert!(T::type_ids() == type_ids);
 
-        self.find_archetype::<T>(type_ids).unwrap_or_else(|| {
+        self.find_archetype(type_ids).unwrap_or_else(|| {
             self.cache.clear();
             self.archetypes.push(T::new_archetype());
             self.archetypes.len() - 1
@@ -151,7 +169,7 @@ impl World {
         self.archetypes
             .get_mut(archetype_idx)
             .unwrap()
-            .add(bundle, entity);
+            .spawn(bundle, entity);
 
         entity
     }
@@ -168,27 +186,212 @@ impl World {
         true
     }
 
-    /*pub fn remove_component<T: 'static>(&mut self, entity: Entity) {
+    pub fn remove_component<T: 'static>(&mut self, entity: Entity) {
         if !self.entities.is_alive(entity) {
             return;
         }
 
-        let archetype = self.find_archetype_from_entity(entity).unwrap();
-        let archetype = &mut self.archetypes[archetype];
+        let current_archetype = self.find_archetype_from_entity(entity).unwrap();
+        let type_ids = self.archetypes[current_archetype].type_ids.clone();
+        let remove_index = type_ids
+            .iter()
+            .position(|&id| id == TypeId::of::<T>())
+            .unwrap();
 
-        let mut type_ids = archetype.type_ids.clone();
-        assert!(!type_ids.contains(&TypeId::of::<T>()));
-        type_ids.push(TypeId::of::<T>());
+        let mut target_type_ids = type_ids.clone();
+        target_type_ids.remove(remove_index);
 
-        let other_archetype = self.find_archetype_or_insert(&type_ids);
-        let other_archetype = &mut self.archetypes[other_archetype];
+        let target_archetype_idx = self
+            .find_archetype(&target_type_ids)
+            .or_else(|| {
+                let mut archetype =
+                    Archetype::from_archetype(&mut self.archetypes[current_archetype]);
 
-        let idx = archetype.sparse.get(entity.uindex()).unwrap();
+                // Remove type_id from archetype.type_ids
+                archetype.type_ids.remove(remove_index);
 
-        for storage in archetype.component_storages.iter_mut() {
-            let other_storage = other_archetype.lookup
+                // Remove type_id entry from archetype.lookup
+                let untyped_vec_idx = archetype.lookup.remove_entry(&TypeId::of::<T>()).unwrap().1;
+
+                // Remove untyped_vec from archetype.component_storages
+                archetype.component_storages.remove(untyped_vec_idx);
+
+                // Decrement indexes returned from archetype.lookup that are > the index of the removed untyped_vec
+                for (_, idx) in archetype.lookup.iter_mut() {
+                    if *idx > untyped_vec_idx {
+                        *idx -= 1;
+                    }
+                }
+
+                self.archetypes.push(archetype);
+                Some(self.archetypes.len() - 1)
+            })
+            .unwrap();
+
+        let (current_archetype, target_archetype) = {
+            if current_archetype < target_archetype_idx {
+                let (left, right) = self.archetypes.split_at_mut(target_archetype_idx);
+                (
+                    left.get_mut(current_archetype).unwrap(),
+                    right.first_mut().unwrap(),
+                )
+            } else if current_archetype > target_archetype_idx {
+                let (left, right) = self.archetypes.split_at_mut(current_archetype);
+                (
+                    right.first_mut().unwrap(),
+                    left.get_mut(target_archetype_idx).unwrap(),
+                )
+            } else {
+                panic!()
+            }
+        };
+
+        let mut target_archetype_num_components = None;
+        let entity_idx = *current_archetype.sparse.get(entity.uindex()).unwrap();
+        for lock in current_archetype.component_storages.iter_mut() {
+            let current_storage = lock.get_mut().unwrap();
+            let type_info = current_storage.get_type_info();
+
+            match target_archetype.lookup.get(&type_info.id) {
+                Some(storage_idx) => {
+                    let target_storage = target_archetype
+                        .component_storages
+                        .get_mut(*storage_idx)
+                        .unwrap()
+                        .get_mut()
+                        .unwrap();
+                    current_storage.swap_move_element_to_other_vec(target_storage, entity_idx);
+
+                    if let Some(num_components) = &mut target_archetype_num_components {
+                        assert!(*num_components == target_storage.len());
+                    } else {
+                        target_archetype_num_components = Some(target_storage.len());
+                    }
+                }
+                None => {
+                    current_storage.swap_remove(entity_idx);
+                }
+            }
         }
-    }*/
+
+        current_archetype.entities.swap_remove(entity_idx);
+        current_archetype.sparse.remove(entity.uindex()).unwrap();
+
+        if current_archetype.entities.len() > 0 && current_archetype.entities.len() != entity_idx {
+            let entity = current_archetype.entities[entity_idx];
+            *current_archetype.sparse.get_mut(entity.uindex()).unwrap() = entity_idx;
+        }
+
+        assert!(target_archetype_num_components.unwrap() > 0);
+
+        target_archetype.entities.push(entity);
+        target_archetype.sparse.insert(
+            entity.uindex(),
+            target_archetype_num_components.unwrap() - 1,
+        );
+
+        *self.entity_to_archetype.get_mut(entity.uindex()).unwrap() = target_archetype_idx
+    }
+
+    pub fn add_component<T: 'static>(&mut self, entity: Entity, component: T) {
+        if !self.entities.is_alive(entity) {
+            return;
+        }
+
+        let current_archetype_idx = *self.entity_to_archetype.get(entity.uindex()).unwrap();
+        let current_archetype = self.archetypes.get_mut(current_archetype_idx).unwrap();
+        let current_type_ids = current_archetype.type_ids.clone();
+
+        assert!(!current_type_ids.contains(&TypeId::of::<T>()));
+
+        let mut target_type_ids = current_type_ids.clone();
+        target_type_ids.push(TypeId::of::<T>());
+
+        let target_archetype_idx = self
+            .find_archetype(&target_type_ids)
+            .or_else(|| {
+                let mut archetype =
+                    Archetype::from_archetype(&mut self.archetypes[current_archetype_idx]);
+
+                archetype.type_ids.push(TypeId::of::<T>());
+                archetype
+                    .lookup
+                    .insert(TypeId::of::<T>(), archetype.component_storages.len());
+                archetype
+                    .component_storages
+                    .push(RwLock::new(UntypedVec::new::<T>()));
+
+                self.archetypes.push(archetype);
+                Some(self.archetypes.len() - 1)
+            })
+            .unwrap();
+
+        let (current_archetype, target_archetype) = {
+            if current_archetype_idx < target_archetype_idx {
+                let (left, right) = self.archetypes.split_at_mut(target_archetype_idx);
+                (
+                    left.get_mut(current_archetype_idx).unwrap(),
+                    right.first_mut().unwrap(),
+                )
+            } else if current_archetype_idx > target_archetype_idx {
+                let (left, right) = self.archetypes.split_at_mut(current_archetype_idx);
+                (
+                    right.first_mut().unwrap(),
+                    left.get_mut(target_archetype_idx).unwrap(),
+                )
+            } else {
+                panic!()
+            }
+        };
+
+        let mut target_archetype_num_components = None;
+        let entity_idx = *current_archetype.sparse.get(entity.uindex()).unwrap();
+        for lock in current_archetype.component_storages.iter_mut() {
+            let current_storage = lock.get_mut().unwrap();
+            let type_id = current_storage.get_type_info().id;
+            let target_storage_idx = target_archetype.lookup[&type_id];
+            let target_storage = target_archetype
+                .component_storages
+                .get_mut(target_storage_idx)
+                .unwrap()
+                .get_mut()
+                .unwrap();
+
+            current_storage.swap_move_element_to_other_vec(target_storage, entity_idx);
+
+            if let Some(num_components) = &mut target_archetype_num_components {
+                assert!(*num_components == target_storage.len());
+            } else {
+                target_archetype_num_components = Some(target_storage.len());
+            }
+        }
+
+        let last_target_storage_idx = target_archetype.lookup[&TypeId::of::<T>()];
+        let last_target_storage = target_archetype
+            .component_storages
+            .get_mut(last_target_storage_idx)
+            .unwrap()
+            .get_mut()
+            .unwrap();
+        last_target_storage.push(component);
+
+        *self.entity_to_archetype.get_mut(entity.uindex()).unwrap() = target_archetype_idx;
+
+        current_archetype.entities.swap_remove(entity_idx);
+        current_archetype.sparse.remove(entity.uindex()).unwrap();
+
+        if current_archetype.entities.len() > 0 && current_archetype.entities.len() != entity_idx {
+            let entity = current_archetype.entities[entity_idx];
+            *current_archetype.sparse.get_mut(entity.uindex()).unwrap() = entity_idx;
+        }
+        assert!(target_archetype_num_components.unwrap() > 0);
+
+        target_archetype.entities.push(entity);
+        target_archetype.sparse.insert(
+            entity.uindex(),
+            target_archetype_num_components.unwrap() - 1,
+        );
+    }
 
     pub fn run(&mut self) -> RunWorldContext {
         RunWorldContext {
@@ -325,5 +528,120 @@ mod tests {
         let entity = world.spawn((10_u32, 12_u64));
 
         assert!(*world.entity_to_archetype.get(entity.uindex()).unwrap() == 0);
+    }
+
+    #[test]
+    pub fn add_component() {
+        let mut world = World::new();
+        let entity = world.spawn((1_u32,));
+        world.add_component(entity, 2_u64);
+
+        assert!(world.archetypes.len() == 2);
+        assert!(*world.entity_to_archetype.get(entity.uindex()).unwrap() == 1);
+
+        assert!(world.archetypes[0].sparse.get(entity.uindex()).is_none());
+        assert!(world.archetypes[0].entities.len() == 0);
+        for lock in world.archetypes[0].component_storages.iter_mut() {
+            let storage = lock.get_mut().unwrap();
+            assert!(storage.len() == 0);
+        }
+
+        assert!(*world.archetypes[1].sparse.get(entity.uindex()).unwrap() == 0);
+        assert!(world.archetypes[1].entities.len() == 1);
+        for lock in world.archetypes[1].component_storages.iter_mut() {
+            let storage = lock.get_mut().unwrap();
+            assert!(storage.len() == 1);
+        }
+
+        let mut run_times = 0;
+        let query = world.query::<(&u32, &u64)>();
+        query.borrow().for_each_mut(|(left, right)| {
+            assert!(*left == 1);
+            assert!(*right == 2);
+            run_times += 1;
+        });
+        assert!(run_times == 1);
+    }
+
+    #[test]
+    pub fn add_component_then_spawn() {
+        let mut world = World::new();
+        let entity = world.spawn((1_u32,));
+        world.add_component(entity, 2_u64);
+
+        let entity2 = world.spawn((3_u32, 4_u64));
+
+        assert!(world.archetypes.len() == 2);
+        assert!(*world.entity_to_archetype.get(entity.uindex()).unwrap() == 1);
+        assert!(*world.entity_to_archetype.get(entity2.uindex()).unwrap() == 1);
+
+        assert!(world.archetypes[0].sparse.get(entity.uindex()).is_none());
+        assert!(world.archetypes[0].sparse.get(entity2.uindex()).is_none());
+        assert!(world.archetypes[0].entities.len() == 0);
+        for lock in world.archetypes[0].component_storages.iter_mut() {
+            let storage = lock.get_mut().unwrap();
+            assert!(storage.len() == 0);
+        }
+
+        assert!(*world.archetypes[1].sparse.get(entity.uindex()).unwrap() == 0);
+        assert!(*world.archetypes[1].sparse.get(entity2.uindex()).unwrap() == 1);
+        assert!(world.archetypes[1].entities.len() == 2);
+        for lock in world.archetypes[1].component_storages.iter_mut() {
+            let storage = lock.get_mut().unwrap();
+            assert!(storage.len() == 2);
+        }
+
+        let mut run_times = 0;
+        let mut checks = vec![(1, 2), (3, 4)].into_iter();
+        let query = world.query::<(&u32, &u64)>();
+        query.borrow().for_each_mut(|(left, right)| {
+            assert!(checks.next().unwrap() == (*left, *right));
+            run_times += 1;
+        });
+        assert!(run_times == 2);
+    }
+
+    #[test]
+    pub fn add_two() {
+        struct A(f32);
+        struct B(f32);
+
+        let mut world = World::new();
+        let entity_1 = world.spawn((A(1.),));
+        let entity_2 = world.spawn((A(1.),));
+
+        assert!(world.archetypes[0].entities[0] == entity_1);
+        assert!(world.archetypes[0].entities[1] == entity_2);
+        assert!(*world.archetypes[0].sparse.get(entity_1.uindex()).unwrap() == 0);
+        assert!(*world.archetypes[0].sparse.get(entity_2.uindex()).unwrap() == 1);
+
+        world.add_component(entity_1, B(2.));
+
+        assert!(world.archetypes[0].entities.len() == 1);
+        assert!(world.archetypes[0].entities[0] == entity_2);
+        dbg!(*world.archetypes[0].sparse.get(entity_2.uindex()).unwrap());
+        assert!(*world.archetypes[0].sparse.get(entity_2.uindex()).unwrap() == 0);
+
+        world.add_component(entity_2, B(2.));
+    }
+
+    #[test]
+    pub fn add_multiple() {
+        struct A(f32);
+        struct B(f32);
+
+        let mut world = World::new();
+        let mut entities = Vec::with_capacity(500);
+
+        for _ in 0..10 {
+            entities.push(world.spawn((A(1.),)));
+        }
+
+        for &entity in entities.iter() {
+            world.add_component(entity, B(1.));
+        }
+        //for &entity in entities.iter() {
+        //    world.remove_component::<B>(entity);
+        //}
     }
 }

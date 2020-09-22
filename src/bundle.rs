@@ -56,6 +56,7 @@ macro_rules! impl_bundle {
 
                 let ($($x,)*) = self;
 
+                archetype.sparse.insert(entity.uindex(), archetype.entities.len());
                 archetype.entities.push(entity);
                 $(
                     let id = TypeId::of::<$x>();

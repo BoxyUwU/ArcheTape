@@ -34,13 +34,13 @@ impl<T, const PAGE_SIZE: usize> SparseArray<T, PAGE_SIZE> {
             self.sparse.resize_with(index / PAGE_SIZE + 1, || None);
         }
 
-        let page = &mut self.sparse[index / PAGE_SIZE];
+        let page = self.sparse.get_mut(index / PAGE_SIZE).unwrap();
         if page.is_none() {
             *page = Some(Box::new([None; PAGE_SIZE]));
         }
 
         let page = page.as_mut().unwrap();
-        let entry = &mut page[index % PAGE_SIZE];
+        let entry = page.get_mut(index % PAGE_SIZE).unwrap();
 
         std::mem::replace(entry, Some(data))
     }

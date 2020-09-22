@@ -239,8 +239,46 @@ pub mod simple_large_iter {
     }
 }
 
+pub mod add_remove {
+    use ellecs::entities::Entity;
+    use ellecs::world::World;
+
+    #[derive(Copy, Clone)]
+    struct A(f32);
+    #[derive(Copy, Clone)]
+    struct B(f32);
+
+    pub struct Benchmark(World, Box<[Entity]>);
+
+    impl Benchmark {
+        pub fn new() -> Self {
+            let mut world = World::new();
+            let mut entities = Vec::with_capacity(10000);
+
+            for _ in 0..10_000 {
+                entities.push(world.spawn((A(1.),)));
+            }
+
+            Benchmark(world, entities.into_boxed_slice())
+        }
+
+        pub fn run(&mut self) {
+            for &entity in self.1.iter() {
+                self.0.add_component(entity, B(1.));
+            }
+            for &entity in self.1.iter() {
+                self.0.remove_component::<B>(entity);
+            }
+        }
+    }
+}
+
 pub fn ellecs(c: &mut Criterion) {
     let mut group = c.benchmark_group("ellecs");
+    group.bench_function("add_remove_10_000", |b| {
+        let mut bench = add_remove::Benchmark::new();
+        b.iter(move || bench.run());
+    });
     group.bench_function("frag_iter_2000_entity", |b| {
         let mut bench = frag_iter_2000::Benchmark::new();
         b.iter(move || bench.run());

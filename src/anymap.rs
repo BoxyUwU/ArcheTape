@@ -19,6 +19,7 @@ impl Hasher for TypeIdHasher {
     }
 }
 
+#[derive(Clone)]
 pub struct TypeIdHasherBuilder();
 
 impl BuildHasher for TypeIdHasherBuilder {
