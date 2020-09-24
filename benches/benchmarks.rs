@@ -1,5 +1,80 @@
 use criterion::*;
 
+pub mod frag_iter_20_comp_26_arch_200_entity {
+    use ellecs::world::World;
+
+    pub struct Data(f32);
+
+    macro_rules! setup {
+        ($world:ident, (bloat: ($($y:ident,)*)), ($($x:ident),*)) => {
+            $(
+                pub struct $x(f32);
+            )*
+
+            $(
+                pub struct $y(f32);
+            )*
+
+            let mut entities = Vec::with_capacity(20 * 26);
+            $(
+                for _ in 0..20 {
+                    let entity = $world.spawn(($y(0.), Data(1.)));
+                    entities.push(entity);
+                }
+            )*
+
+
+            $(
+                for entity in entities.iter() {
+                    $world.add_component(*entity, $x(0.));
+                }
+            )*
+        };
+    }
+
+    pub struct Benchmark(World);
+
+    impl Benchmark {
+        pub fn new() -> Benchmark {
+            let mut world = World::new();
+            setup!(
+                world,
+                (bloat:
+                    (
+                        Bloat1,
+                        Bloat2,
+                        Bloat3,
+                        Bloat4,
+                        Bloat5,
+                        Bloat6,
+                        Bloat7,
+                        Bloat8,
+                        Bloat9,
+                        Bloat10,
+                        Bloat11,
+                        Bloat12,
+                        Bloat13,
+                        Bloat14,
+                        Bloat15,
+                        Bloat16,
+                        Bloat17,
+                        Bloat18,
+                        Bloat19,
+                        Bloat20,
+                    )),
+                (A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z)
+            );
+            Benchmark(world)
+        }
+
+        pub fn run(&mut self) {
+            self.0.query::<(&mut Data,)>().borrow().for_each(|(data,)| {
+                data.0 *= 2.;
+            });
+        }
+    }
+}
+
 pub mod frag_iter_2000 {
     use ellecs::world::World;
 
@@ -33,6 +108,44 @@ pub mod frag_iter_2000 {
         pub fn run(&mut self) {
             self.0.query::<(&mut Data,)>().borrow().for_each(|(data,)| {
                 data.0 *= 2.0;
+            });
+        }
+    }
+}
+
+pub mod frag_iter_200 {
+    use ellecs::world::World;
+
+    pub struct Data(f32);
+
+    macro_rules! setup {
+        ($world:ident, $($x:ident),*) => {
+            $(
+                pub struct $x(f32);
+            )*
+
+            $(
+                for _ in 0..200 {
+                    $world.spawn(($x(0.), Data(1.)));
+                }
+            )*
+        };
+    }
+
+    pub struct Benchmark(World);
+
+    impl Benchmark {
+        pub fn new() -> Benchmark {
+            let mut world = World::new();
+            setup!(
+                world, A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z
+            );
+            Benchmark(world)
+        }
+
+        pub fn run(&mut self) {
+            self.0.query::<(&mut Data,)>().borrow().for_each(|(data,)| {
+                data.0 *= 2.;
             });
         }
     }
@@ -275,12 +388,24 @@ pub mod add_remove {
 
 pub fn ellecs(c: &mut Criterion) {
     let mut group = c.benchmark_group("ellecs");
+    group.bench_function("frag_iter_20_comp_26_arch_200_entity", |b| {
+        let mut bench = frag_iter_20_comp_26_arch_200_entity::Benchmark::new();
+        b.iter(move || bench.run());
+    });
+    group.bench_function("frag_iter_200_entity", |b| {
+        let mut bench = frag_iter_200::Benchmark::new();
+        b.iter(move || bench.run());
+    });
     group.bench_function("add_remove_10_000", |b| {
         let mut bench = add_remove::Benchmark::new();
         b.iter(move || bench.run());
     });
     group.bench_function("frag_iter_2000_entity", |b| {
         let mut bench = frag_iter_2000::Benchmark::new();
+        b.iter(move || bench.run());
+    });
+    group.bench_function("frag_iter_20_entity", |b| {
+        let mut bench = frag_iter_20::Benchmark::new();
         b.iter(move || bench.run());
     });
     group.bench_function("simple_large_iter", |b| {
@@ -297,10 +422,6 @@ pub fn ellecs(c: &mut Criterion) {
     });
     group.bench_function("simple_iter", |b| {
         let mut bench = simple_iter::Benchmark::new();
-        b.iter(move || bench.run());
-    });
-    group.bench_function("frag_iter_20_entity", |b| {
-        let mut bench = frag_iter_20::Benchmark::new();
         b.iter(move || bench.run());
     });
 }
