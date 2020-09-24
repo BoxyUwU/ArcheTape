@@ -88,9 +88,7 @@ impl World {
             return None;
         }
 
-        self.entity_to_archetype
-            .get(entity.uindex())
-            .map(|idx| *idx)
+        self.entity_to_archetype.get(entity.uindex()).copied()
     }
 
     pub fn add_entity_to_sparse_array(&mut self, entity: Entity, archetype: usize) {

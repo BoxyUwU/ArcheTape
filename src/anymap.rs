@@ -91,7 +91,7 @@ impl<'a> AnyMap {
         }
     }
 
-    pub fn insert<'this, T: 'static>(&'this mut self, data: T) {
+    pub fn insert<T: 'static>(&mut self, data: T) {
         let type_id = TypeId::of::<T>();
         self.map.insert(type_id, RwLock::new(Box::new(data)));
     }

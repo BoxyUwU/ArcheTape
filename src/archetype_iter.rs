@@ -227,9 +227,9 @@ pub unsafe trait Borrow<'b, 'guard: 'b>: Sized + 'static {
 
     fn iter_from_guard(guard: &'b mut Self::StorageBorrow) -> (usize, Self::Iter);
 
-    fn borrow_from_iter<'a>(iter: &'a mut Self::Iter) -> Option<Self::Returns>;
+    fn borrow_from_iter(iter: &mut Self::Iter) -> Option<Self::Returns>;
 
-    unsafe fn borrow_from_iter_unchecked<'a>(iter: &'a mut Self::Iter) -> Self::Returns;
+    unsafe fn borrow_from_iter_unchecked(iter: &mut Self::Iter) -> Self::Returns;
 
     fn guards_from_archetype(archetype: &'guard Archetype) -> Self::StorageBorrow;
 
@@ -251,13 +251,13 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
     }
 
     #[inline(always)]
-    fn borrow_from_iter<'a>(iter: &'a mut Self::Iter) -> Option<Self::Returns> {
+    fn borrow_from_iter(iter: &mut Self::Iter) -> Option<Self::Returns> {
         iter.next()
     }
 
     #[inline(always)]
     #[allow(unused_unsafe)]
-    unsafe fn borrow_from_iter_unchecked<'a>(iter: &'a mut Self::Iter) -> Self::Returns {
+    unsafe fn borrow_from_iter_unchecked(iter: &mut Self::Iter) -> Self::Returns {
         match iter.next() {
             Some(item) => return item,
             _ => unsafe { std::hint::unreachable_unchecked() },
@@ -294,13 +294,13 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
     }
 
     #[inline(always)]
-    fn borrow_from_iter<'a>(iter: &'a mut Self::Iter) -> Option<Self::Returns> {
+    fn borrow_from_iter(iter: &mut Self::Iter) -> Option<Self::Returns> {
         iter.next()
     }
 
     #[inline(always)]
     #[allow(unused_unsafe)]
-    unsafe fn borrow_from_iter_unchecked<'a>(iter: &'a mut Self::Iter) -> Self::Returns {
+    unsafe fn borrow_from_iter_unchecked(iter: &mut Self::Iter) -> Self::Returns {
         match iter.next() {
             Some(item) => item,
             None => unsafe { std::hint::unreachable_unchecked() },
@@ -337,13 +337,13 @@ unsafe impl<'b, 'guard: 'b> Borrow<'b, 'guard> for Entities {
     }
 
     #[inline(always)]
-    fn borrow_from_iter<'a>(iter: &'a mut Self::Iter) -> Option<Self::Returns> {
+    fn borrow_from_iter(iter: &mut Self::Iter) -> Option<Self::Returns> {
         iter.next()
     }
 
     #[inline(always)]
     #[allow(unused_unsafe)]
-    unsafe fn borrow_from_iter_unchecked<'a>(iter: &'a mut Self::Iter) -> Self::Returns {
+    unsafe fn borrow_from_iter_unchecked(iter: &mut Self::Iter) -> Self::Returns {
         match iter.next() {
             Some(item) => item,
             None => unsafe { std::hint::unreachable_unchecked() },

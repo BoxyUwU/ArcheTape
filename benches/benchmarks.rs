@@ -388,6 +388,10 @@ pub mod add_remove {
 
 pub fn ellecs(c: &mut Criterion) {
     let mut group = c.benchmark_group("ellecs");
+    group.bench_function("frag_iter_20_entity", |b| {
+        let mut bench = frag_iter_20::Benchmark::new();
+        b.iter(move || bench.run());
+    });
     group.bench_function("frag_iter_20_comp_26_arch_200_entity", |b| {
         let mut bench = frag_iter_20_comp_26_arch_200_entity::Benchmark::new();
         b.iter(move || bench.run());
@@ -396,16 +400,12 @@ pub fn ellecs(c: &mut Criterion) {
         let mut bench = frag_iter_200::Benchmark::new();
         b.iter(move || bench.run());
     });
-    group.bench_function("add_remove_10_000", |b| {
-        let mut bench = add_remove::Benchmark::new();
-        b.iter(move || bench.run());
-    });
     group.bench_function("frag_iter_2000_entity", |b| {
         let mut bench = frag_iter_2000::Benchmark::new();
         b.iter(move || bench.run());
     });
-    group.bench_function("frag_iter_20_entity", |b| {
-        let mut bench = frag_iter_20::Benchmark::new();
+    group.bench_function("simple_iter", |b| {
+        let mut bench = simple_iter::Benchmark::new();
         b.iter(move || bench.run());
     });
     group.bench_function("simple_large_iter", |b| {
@@ -420,8 +420,8 @@ pub fn ellecs(c: &mut Criterion) {
         let mut bench = frag_insert::Benchmark::new();
         b.iter(move || bench.run());
     });
-    group.bench_function("simple_iter", |b| {
-        let mut bench = simple_iter::Benchmark::new();
+    group.bench_function("add_remove_10_000", |b| {
+        let mut bench = add_remove::Benchmark::new();
         b.iter(move || bench.run());
     });
 }
