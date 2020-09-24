@@ -16,8 +16,8 @@ pub struct Archetype {
     pub sparse: SparseArray<usize, PAGE_SIZE>,
 
     pub lookup: HashMap<TypeId, usize, crate::anymap::TypeIdHasherBuilder>,
-    pub type_ids: Vec<TypeId>,
 
+    pub type_ids: Vec<TypeId>,
     pub entities: Vec<Entity>,
     pub component_storages: Vec<RwLock<UntypedVec>>,
 }
@@ -142,11 +142,12 @@ impl World {
     }
 
     pub fn query_archetypes<T: QueryInfos>(&self) -> impl Iterator<Item = usize> + '_ {
+        let type_ids = T::type_ids();
         self.archetypes
             .iter()
             .enumerate()
-            .filter(|(_, archetype)| {
-                T::type_ids().iter().all(|id| {
+            .filter(move |(_, archetype)| {
+                type_ids.iter().all(|id| {
                     if let Some(id) = id {
                         archetype.type_ids.contains(id)
                     } else {
@@ -199,7 +200,7 @@ impl World {
             .unwrap();
 
         let mut target_type_ids = type_ids.clone();
-        target_type_ids.remove(remove_index);
+        target_type_ids.swap_remove(remove_index);
 
         let target_archetype_idx = self
             .find_archetype(&target_type_ids)
@@ -208,7 +209,7 @@ impl World {
                     Archetype::from_archetype(&mut self.archetypes[current_archetype]);
 
                 // Remove type_id from archetype.type_ids
-                archetype.type_ids.remove(remove_index);
+                archetype.type_ids.swap_remove(remove_index);
 
                 // Remove type_id entry from archetype.lookup
                 let untyped_vec_idx = archetype.lookup.remove_entry(&TypeId::of::<T>()).unwrap().1;

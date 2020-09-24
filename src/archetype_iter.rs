@@ -151,6 +151,22 @@ macro_rules! impl_query_infos {
     };
 }
 
+/*impl_query_infos!(A B C D E F G H I J K L M N O P Q R S T U V W X Y Z);
+impl_query_infos!(A B C D E F G H I J K L M N O P Q R S T U V W X Y);
+impl_query_infos!(A B C D E F G H I J K L M N O P Q R S T U V W X);
+impl_query_infos!(A B C D E F G H I J K L M N O P Q R S T U V W);
+impl_query_infos!(A B C D E F G H I J K L M N O P Q R S T U V);
+impl_query_infos!(A B C D E F G H I J K L M N O P Q R S T U);
+impl_query_infos!(A B C D E F G H I J K L M N O P Q R S T);
+impl_query_infos!(A B C D E F G H I J K L M N O P Q R S);
+impl_query_infos!(A B C D E F G H I J K L M N O P Q R);
+impl_query_infos!(A B C D E F G H I J K L M N O P Q);
+impl_query_infos!(A B C D E F G H I J K L M N O P);
+impl_query_infos!(A B C D E F G H I J K L M N O);
+impl_query_infos!(A B C D E F G H I J K L M N);
+impl_query_infos!(A B C D E F G H I J K L M);
+impl_query_infos!(A B C D E F G H I J K L);
+impl_query_infos!(A B C D E F G H I J K);*/
 impl_query_infos!(A B C D E F G H I J);
 impl_query_infos!(A B C D E F G H I);
 impl_query_infos!(A B C D E F G H);
@@ -249,8 +265,13 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
     }
 
     fn guards_from_archetype(archetype: &'guard Archetype) -> Self::StorageBorrow {
-        let idx = archetype.lookup[&TypeId::of::<T>()];
-        archetype.component_storages[idx].read().unwrap()
+        let type_id = TypeId::of::<T>();
+        for (n, id) in archetype.type_ids.iter().enumerate() {
+            if id == &type_id {
+                return archetype.component_storages[n].read().unwrap();
+            }
+        }
+        panic!("Guard not found")
     }
 
     fn iter_empty<'a>() -> Self::Iter {
@@ -287,8 +308,13 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
     }
 
     fn guards_from_archetype(archetype: &'guard Archetype) -> Self::StorageBorrow {
-        let idx = archetype.lookup[&TypeId::of::<T>()];
-        archetype.component_storages[idx].write().unwrap()
+        let type_id = TypeId::of::<T>();
+        for (n, id) in archetype.type_ids.iter().enumerate() {
+            if id == &type_id {
+                return archetype.component_storages[n].write().unwrap();
+            }
+        }
+        panic!("Guard not found")
     }
 
     fn iter_empty<'a>() -> Self::Iter {
