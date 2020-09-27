@@ -2,6 +2,7 @@ use super::entities::Entity;
 use super::sparse_array::SparseArray;
 use super::world::Archetype;
 use std::any::TypeId;
+use std::cell::UnsafeCell;
 
 pub trait Bundle {
     fn arity() -> usize;
@@ -30,8 +31,7 @@ macro_rules! impl_bundle {
             fn new_archetype() -> Archetype {
                 let type_ids = Self::type_ids();
 
-                use std::sync::RwLock;
-                let component_storages = vec![$(RwLock::new(crate::untyped_vec::UntypedVec::new::<$x>()),)*];
+                let component_storages = vec![$(UnsafeCell::new(crate::untyped_vec::UntypedVec::new::<$x>()),)*];
 
                 use std::collections::HashMap;
                 let mut hashmap = HashMap::with_hasher(crate::anymap::TypeIdHasherBuilder());
@@ -62,7 +62,7 @@ macro_rules! impl_bundle {
                     let id = TypeId::of::<$x>();
                     let idx = archetype.lookup[&id];
                     let storage = &mut archetype.component_storages[idx];
-                    let lock = storage.get_mut().expect("Bundle-Archetype mismatch. Attempted to add entity to archetype with wrong components");
+                    let lock = storage.get_mut();
                     lock.push($x);
                 )*
             }

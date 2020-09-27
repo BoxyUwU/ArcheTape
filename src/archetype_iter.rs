@@ -1,15 +1,12 @@
 use super::entities::{Entities, Entity};
 use super::untyped_vec::UntypedVec;
 use super::world::{Archetype, World};
-use std::any::{Any, TypeId};
+use std::any::TypeId;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::slice::{Iter, IterMut};
+use std::sync::RwLock;
 use std::sync::{RwLockReadGuard, RwLockWriteGuard};
-
-pub enum RwLockEitherGuard<'a> {
-    WriteGuard(RwLockWriteGuard<'a, Box<dyn Any>>),
-    ReadGuard(RwLockReadGuard<'a, Box<dyn Any>>),
-}
 
 #[derive(Copy, Clone)]
 pub struct Query<'a, T: QueryInfos + 'static> {
@@ -26,8 +23,15 @@ impl<'a, T: QueryInfos + 'static> Query<'a, T> {
     }
 }
 
-pub struct QueryBorrow<'b, 'guard, T: QueryInfos + 'static, U: StorageBorrows<'b, T>> {
-    lock_guards: Vec<U>,
+pub struct QueryBorrow<
+    'b,
+    'guard: 'b,
+    T: QueryInfos + 'static,
+    U: StorageBorrows<'b, T>,
+    Locks: 'guard,
+> {
+    storage_Borrows: Vec<U>,
+    locks: Locks,
     phantom: PhantomData<&'b T>,
     phantom2: PhantomData<&'guard ()>,
 }
@@ -45,33 +49,42 @@ macro_rules! impl_query_infos {
         }
 
         impl<'a, 'guard: 'a, $($x: Borrow<'a, 'guard>,)*> Query<'a, ($($x,)*)> {
-            pub fn borrow<'this: 'guard>(&'this self) -> QueryBorrow<'a, 'guard, ($($x,)*), ($($x::StorageBorrow,)*)> {
+            pub fn borrow<'this: 'guard>(&'this self) -> QueryBorrow<'a, 'guard, ($($x,)*), ($($x::StorageBorrow,)*), ($($x::Lock,)*)> {
                 let archetypes = self.world.query_archetypes::<($($x,)*)>();
-                let mut guards: Vec<($($x::StorageBorrow,)*)> = Vec::with_capacity(16);
+                let mut borrows: Vec<($($x::StorageBorrow,)*)> = Vec::with_capacity(16);
+
+                let locks = Self::acquire_locks(&self.world.lock_lookup, &self.world.locks);
 
                 for archetype in archetypes.map(|idx| self.world.archetypes.get(idx).unwrap()) {
-                    <Query<($($x,)*)>>::borrow_guards(&mut guards, archetype);
+                    <Query<($($x,)*)>>::borrow_storages(&mut borrows, archetype);
                 }
 
                 QueryBorrow {
-                    lock_guards: guards,
+                    storage_Borrows: borrows,
+                    locks,
                     phantom: PhantomData,
                     phantom2: PhantomData,
                 }
             }
 
-            pub fn borrow_guards(all_guards: &mut Vec<($($x::StorageBorrow,)*)>, archetype: &'guard Archetype) {
+            pub fn acquire_locks(lock_lookup: &HashMap<TypeId, usize>, locks: &'guard [RwLock<()>]) -> ($($x::Lock,)*) {
+                ($(
+                    $x::acquire_lock(&lock_lookup, &locks),
+                )*)
+            }
+
+            pub fn borrow_storages(all_guards: &mut Vec<($($x::StorageBorrow,)*)>, archetype: &'guard Archetype) {
                 all_guards.push(
                     ($(
-                        <$x as Borrow<'a, 'guard>>::guards_from_archetype(archetype),
+                        <$x as Borrow<'a, 'guard>>::borrow_storage(archetype),
                     )*)
                 );
             }
         }
 
-        impl<'b, 'guard: 'b, $($x: Borrow<'b, 'guard>,)*> QueryBorrow<'b, 'guard, ($($x,)*), ($(<$x as Borrow<'b, 'guard>>::StorageBorrow,)*)> {
+        impl<'b, 'guard: 'b, $($x: Borrow<'b, 'guard>,)*> QueryBorrow<'b, 'guard, ($($x,)*), ($(<$x as Borrow<'b, 'guard>>::StorageBorrow,)*), ($($x::Lock,)*)> {
             pub fn for_each_mut<Func: FnMut(($($x::Returns,)*))>(&'b mut self, mut func: Func) {
-                for guards in self.lock_guards.iter_mut() {
+                for guards in self.storage_Borrows.iter_mut() {
                     let iter = <($(
                         $x::Iter,
                     )*) as Iters<($($x,)*)>>::iter_from_guards(guards);
@@ -84,7 +97,7 @@ macro_rules! impl_query_infos {
             }
 
             pub fn for_each<Func: Fn(($($x::Returns,)*))>(&'b mut self, func: Func) {
-                for guards in self.lock_guards.iter_mut() {
+                for guards in self.storage_Borrows.iter_mut() {
                     let iter = <($(
                         $x::Iter,
                     )*) as Iters<($($x,)*)>>::iter_from_guards(guards);
@@ -224,6 +237,7 @@ pub unsafe trait Borrow<'b, 'guard: 'b>: Sized + 'static {
     type Returns: 'b;
     type Iter: ExactSizeIterator + 'b;
     type StorageBorrow: 'guard;
+    type Lock: 'guard;
 
     fn iter_from_guard(guard: &'b mut Self::StorageBorrow) -> (usize, Self::Iter);
 
@@ -231,7 +245,12 @@ pub unsafe trait Borrow<'b, 'guard: 'b>: Sized + 'static {
 
     unsafe fn borrow_from_iter_unchecked(iter: &mut Self::Iter) -> Self::Returns;
 
-    fn guards_from_archetype(archetype: &'guard Archetype) -> Self::StorageBorrow;
+    fn borrow_storage(archetype: &'guard Archetype) -> Self::StorageBorrow;
+
+    fn acquire_lock(
+        lock_lookup: &HashMap<TypeId, usize>,
+        locks: &'guard [RwLock<()>],
+    ) -> Self::Lock;
 
     fn iter_empty<'a>() -> Self::Iter;
 
@@ -243,10 +262,11 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
     type Of = T;
     type Returns = &'b T;
     type Iter = Iter<'b, T>;
-    type StorageBorrow = RwLockReadGuard<'guard, UntypedVec>;
+    type StorageBorrow = &'guard UntypedVec;
+    type Lock = RwLockReadGuard<'guard, ()>;
 
-    fn iter_from_guard(guard: &'b mut Self::StorageBorrow) -> (usize, Self::Iter) {
-        let slice = guard.as_slice::<T>();
+    fn iter_from_guard(borrow: &'b mut Self::StorageBorrow) -> (usize, Self::Iter) {
+        let slice = borrow.as_slice::<T>();
         (slice.len(), slice.iter())
     }
 
@@ -264,14 +284,23 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
         }
     }
 
-    fn guards_from_archetype(archetype: &'guard Archetype) -> Self::StorageBorrow {
+    fn borrow_storage(archetype: &'guard Archetype) -> Self::StorageBorrow {
         let type_id = TypeId::of::<T>();
+
         for (n, id) in archetype.type_ids.iter().enumerate() {
             if id == &type_id {
-                return archetype.component_storages[n].read().unwrap();
+                return unsafe { &*archetype.component_storages[n].get() };
             }
         }
         panic!("Guard not found")
+    }
+
+    fn acquire_lock(
+        lock_lookup: &HashMap<TypeId, usize>,
+        locks: &'guard [RwLock<()>],
+    ) -> Self::Lock {
+        let lock_idx = lock_lookup[&TypeId::of::<T>()];
+        locks.get(lock_idx).unwrap().read().unwrap()
     }
 
     fn iter_empty<'a>() -> Self::Iter {
@@ -286,7 +315,8 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
     type Of = T;
     type Returns = &'b mut T;
     type Iter = IterMut<'b, T>;
-    type StorageBorrow = RwLockWriteGuard<'guard, UntypedVec>;
+    type StorageBorrow = &'guard mut UntypedVec;
+    type Lock = RwLockWriteGuard<'guard, ()>;
 
     fn iter_from_guard(guard: &'b mut Self::StorageBorrow) -> (usize, Self::Iter) {
         let slice = guard.as_slice_mut::<T>();
@@ -307,14 +337,23 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
         }
     }
 
-    fn guards_from_archetype(archetype: &'guard Archetype) -> Self::StorageBorrow {
+    fn borrow_storage(archetype: &'guard Archetype) -> Self::StorageBorrow {
         let type_id = TypeId::of::<T>();
+
         for (n, id) in archetype.type_ids.iter().enumerate() {
             if id == &type_id {
-                return archetype.component_storages[n].write().unwrap();
+                return unsafe { &mut *archetype.component_storages[n].get() };
             }
         }
         panic!("Guard not found")
+    }
+
+    fn acquire_lock(
+        lock_lookup: &HashMap<TypeId, usize>,
+        locks: &'guard [RwLock<()>],
+    ) -> Self::Lock {
+        let lock_idx = lock_lookup[&TypeId::of::<T>()];
+        locks.get(lock_idx).unwrap().write().unwrap()
     }
 
     fn iter_empty<'a>() -> Self::Iter {
@@ -331,6 +370,7 @@ unsafe impl<'b, 'guard: 'b> Borrow<'b, 'guard> for Entities {
     type Returns = Entity;
     type Iter = std::iter::Copied<Iter<'b, Entity>>;
     type StorageBorrow = &'guard Vec<Entity>;
+    type Lock = ();
 
     fn iter_from_guard(guard: &'b mut Self::StorageBorrow) -> (usize, Self::Iter) {
         (guard.len(), guard.iter().copied())
@@ -350,8 +390,12 @@ unsafe impl<'b, 'guard: 'b> Borrow<'b, 'guard> for Entities {
         }
     }
 
-    fn guards_from_archetype(archetype: &'guard Archetype) -> Self::StorageBorrow {
+    fn borrow_storage(archetype: &'guard Archetype) -> Self::StorageBorrow {
         &archetype.entities
+    }
+
+    fn acquire_lock(_: &HashMap<TypeId, usize>, _: &'guard [RwLock<()>]) -> Self::Lock {
+        ()
     }
 
     fn iter_empty<'a>() -> Self::Iter {

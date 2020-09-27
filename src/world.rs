@@ -6,6 +6,7 @@ use super::lifetime_anymap::{LifetimeAnyMap, LifetimeAnyMapBorrow, LifetimeAnyMa
 use super::sparse_array::SparseArray;
 use super::untyped_vec::UntypedVec;
 use std::any::TypeId;
+use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::RwLock;
@@ -19,7 +20,7 @@ pub struct Archetype {
 
     pub type_ids: Vec<TypeId>,
     pub entities: Vec<Entity>,
-    pub component_storages: Vec<RwLock<UntypedVec>>,
+    pub component_storages: Vec<UnsafeCell<UntypedVec>>,
 }
 
 impl Archetype {
@@ -38,9 +39,9 @@ impl Archetype {
             component_storages: {
                 let mut storages = Vec::with_capacity(from.component_storages.len());
                 for storage in from.component_storages.iter_mut() {
-                    let untyped_vec = UntypedVec::new_from_untyped_vec(storage.get_mut().unwrap());
-                    let lock = RwLock::new(untyped_vec);
-                    storages.push(lock);
+                    let untyped_vec = UntypedVec::new_from_untyped_vec(storage.get_mut());
+                    let cell = UnsafeCell::new(untyped_vec);
+                    storages.push(cell);
                 }
                 storages
             },
@@ -55,7 +56,7 @@ impl Archetype {
         if let Some(idx) = self.sparse.remove(entity.uindex()) {
             self.entities.remove(idx);
             for lock in self.component_storages.iter_mut() {
-                let storage = lock.get_mut().unwrap();
+                let storage = lock.get_mut();
                 storage.swap_remove(idx);
             }
         }
@@ -64,12 +65,15 @@ impl Archetype {
 }
 
 pub struct World {
-    pub archetypes: Vec<Archetype>,
+    pub(crate) archetypes: Vec<Archetype>,
     owned_resources: AnyMap,
     entities: Entities,
     cache: Vec<(Vec<TypeId>, usize)>,
 
     entity_to_archetype: SparseArray<usize, PAGE_SIZE>,
+
+    pub(crate) lock_lookup: HashMap<TypeId, usize>,
+    pub(crate) locks: Vec<RwLock<()>>,
 }
 
 impl World {
@@ -80,6 +84,9 @@ impl World {
             entities: Entities::new(),
             cache: Vec::with_capacity(8),
             entity_to_archetype: SparseArray::with_capacity(32),
+
+            lock_lookup: HashMap::new(),
+            locks: Vec::new(),
         }
     }
 
@@ -133,6 +140,13 @@ impl World {
         debug_assert!(T::type_ids() == type_ids);
 
         self.find_archetype(type_ids).unwrap_or_else(|| {
+            for id in type_ids {
+                if !self.lock_lookup.contains_key(id) {
+                    self.lock_lookup.insert(*id, self.locks.len());
+                    self.locks.push(RwLock::new(()));
+                }
+            }
+
             self.cache.clear();
             self.archetypes.push(T::new_archetype());
             self.archetypes.len() - 1
@@ -248,7 +262,7 @@ impl World {
         let mut target_archetype_num_components = None;
         let entity_idx = *current_archetype.sparse.get(entity.uindex()).unwrap();
         for lock in current_archetype.component_storages.iter_mut() {
-            let current_storage = lock.get_mut().unwrap();
+            let current_storage = lock.get_mut();
             let type_info = current_storage.get_type_info();
 
             match target_archetype.lookup.get(&type_info.id) {
@@ -257,8 +271,7 @@ impl World {
                         .component_storages
                         .get_mut(*storage_idx)
                         .unwrap()
-                        .get_mut()
-                        .unwrap();
+                        .get_mut();
                     current_storage.swap_move_element_to_other_vec(target_storage, entity_idx);
 
                     if let Some(num_components) = &mut target_archetype_num_components {
@@ -293,6 +306,11 @@ impl World {
     }
 
     pub fn add_component<T: 'static>(&mut self, entity: Entity, component: T) {
+        if !self.lock_lookup.contains_key(&TypeId::of::<T>()) {
+            self.lock_lookup.insert(TypeId::of::<T>(), self.locks.len());
+            self.locks.push(RwLock::new(()));
+        }
+
         if !self.entities.is_alive(entity) {
             return;
         }
@@ -318,7 +336,7 @@ impl World {
                     .insert(TypeId::of::<T>(), archetype.component_storages.len());
                 archetype
                     .component_storages
-                    .push(RwLock::new(UntypedVec::new::<T>()));
+                    .push(UnsafeCell::new(UntypedVec::new::<T>()));
 
                 self.archetypes.push(archetype);
                 Some(self.archetypes.len() - 1)
@@ -346,15 +364,14 @@ impl World {
         let mut target_archetype_num_components = None;
         let entity_idx = *current_archetype.sparse.get(entity.uindex()).unwrap();
         for lock in current_archetype.component_storages.iter_mut() {
-            let current_storage = lock.get_mut().unwrap();
+            let current_storage = lock.get_mut();
             let type_id = current_storage.get_type_info().id;
             let target_storage_idx = target_archetype.lookup[&type_id];
             let target_storage = target_archetype
                 .component_storages
                 .get_mut(target_storage_idx)
                 .unwrap()
-                .get_mut()
-                .unwrap();
+                .get_mut();
 
             current_storage.swap_move_element_to_other_vec(target_storage, entity_idx);
 
@@ -370,8 +387,8 @@ impl World {
             .component_storages
             .get_mut(last_target_storage_idx)
             .unwrap()
-            .get_mut()
-            .unwrap();
+            .get_mut();
+
         last_target_storage.push(component);
 
         *self.entity_to_archetype.get_mut(entity.uindex()).unwrap() = target_archetype_idx;
@@ -541,14 +558,14 @@ mod tests {
         assert!(world.archetypes[0].sparse.get(entity.uindex()).is_none());
         assert!(world.archetypes[0].entities.len() == 0);
         for lock in world.archetypes[0].component_storages.iter_mut() {
-            let storage = lock.get_mut().unwrap();
+            let storage = lock.get_mut();
             assert!(storage.len() == 0);
         }
 
         assert!(*world.archetypes[1].sparse.get(entity.uindex()).unwrap() == 0);
         assert!(world.archetypes[1].entities.len() == 1);
         for lock in world.archetypes[1].component_storages.iter_mut() {
-            let storage = lock.get_mut().unwrap();
+            let storage = lock.get_mut();
             assert!(storage.len() == 1);
         }
 
@@ -578,7 +595,7 @@ mod tests {
         assert!(world.archetypes[0].sparse.get(entity2.uindex()).is_none());
         assert!(world.archetypes[0].entities.len() == 0);
         for lock in world.archetypes[0].component_storages.iter_mut() {
-            let storage = lock.get_mut().unwrap();
+            let storage = lock.get_mut();
             assert!(storage.len() == 0);
         }
 
@@ -586,7 +603,7 @@ mod tests {
         assert!(*world.archetypes[1].sparse.get(entity2.uindex()).unwrap() == 1);
         assert!(world.archetypes[1].entities.len() == 2);
         for lock in world.archetypes[1].component_storages.iter_mut() {
-            let storage = lock.get_mut().unwrap();
+            let storage = lock.get_mut();
             assert!(storage.len() == 2);
         }
 
