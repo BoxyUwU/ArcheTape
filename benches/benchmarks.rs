@@ -1,6 +1,6 @@
 use criterion::*;
 
-pub mod frag_iter_20_comp_26_arch_200_entity {
+pub mod frag_iter_20_padding_20 {
     use ellecs::world::World;
 
     pub struct Data(f32);
@@ -15,20 +15,15 @@ pub mod frag_iter_20_comp_26_arch_200_entity {
                 pub struct $y(f32);
             )*
 
-            let mut entities = Vec::with_capacity(20 * 26);
             $(
                 for _ in 0..20 {
-                    let entity = $world.spawn(($y(0.), Data(1.)));
-                    entities.push(entity);
+                    spawn_entity(&mut $world, $x);
                 }
             )*
 
-
-            $(
-                for entity in entities.iter() {
-                    $world.add_component(*entity, $x(0.));
-                }
-            )*
+            fn spawn_entity<T: 'static>(world: &mut World, data: T) {
+                world.spawn((data, $($y(2.),)* Data(1.)));
+            }
         };
     }
 
@@ -392,8 +387,8 @@ pub fn ellecs(c: &mut Criterion) {
         let mut bench = frag_iter_20::Benchmark::new();
         b.iter(move || bench.run());
     });
-    group.bench_function("frag_iter_20_comp_26_arch_200_entity", |b| {
-        let mut bench = frag_iter_20_comp_26_arch_200_entity::Benchmark::new();
+    group.bench_function("frag_iter_20_padding_20", |b| {
+        let mut bench = frag_iter_20_padding_20::Benchmark::new();
         b.iter(move || bench.run());
     });
     group.bench_function("frag_iter_200_entity", |b| {

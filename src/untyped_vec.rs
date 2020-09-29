@@ -57,8 +57,6 @@ impl UntypedVec {
         type_info: TypeInfo,
         drop_fn: Option<fn(*mut MaybeUninit<u8>)>,
     ) -> Self {
-        assert!(type_info.layout.size() != 0);
-
         Self {
             type_info,
             data: NonNull::dangling(),
@@ -73,14 +71,20 @@ impl UntypedVec {
     }
 
     pub fn len(&self) -> usize {
+        if self.type_info.layout.size() == 0 {
+            return self.len;
+        }
+
         assert!(self.len % self.type_info.layout.size() == 0);
         self.len / self.type_info.layout.size()
     }
 
     pub fn realloc(&mut self) {
-        if self.cap == 0 {
-            assert!(self.type_info.layout.size() != 0);
+        if self.type_info.layout.size() == 0 {
+            panic!("Attempted to reallocate an UntypedVec who's data is size 0");
+        }
 
+        if self.cap == 0 {
             let new_cap = self.type_info.layout.size() * 4;
             let layout = Layout::from_size_align(new_cap, self.type_info.layout.align()).unwrap();
 
@@ -91,8 +95,6 @@ impl UntypedVec {
             self.cap = new_cap;
             self.data = ptr;
         } else {
-            assert!(self.type_info.layout.size() != 0);
-
             let new_cap = self.cap * 2;
             assert!(new_cap < isize::MAX as usize);
             let old_layout =
@@ -121,8 +123,12 @@ impl UntypedVec {
     #[allow(unused_unsafe)]
     pub unsafe fn push_raw(&mut self, src: *const MaybeUninit<u8>, type_info: TypeInfo) {
         assert!(type_info == self.type_info);
-        assert!(type_info.layout.size() != 0);
         assert!(src.is_null() == false);
+
+        if self.type_info.layout.size() == 0 {
+            self.len += 1;
+            return;
+        }
 
         // A realloc is guaranteed to make enough room to push to data because the initial allocation is of
         // type_info.layout.size() * 4, which means that a realloc will always allocate more than the required bytes
@@ -158,7 +164,16 @@ impl UntypedVec {
 
     /// Returns true if a value was popped
     pub fn pop(&mut self) -> bool {
-        if self.len >= self.type_info.layout.size() {
+        if self.type_info.layout.size() == 0 && self.len > 0 {
+            self.len -= 1;
+            let ptr = self.data.as_ptr();
+            let ptr = ptr as *mut MaybeUninit<u8>;
+
+            if let Some(drop_fn) = self.drop_fn {
+                drop_fn(ptr);
+            }
+            true
+        } else if self.len >= self.type_info.layout.size() {
             self.len -= self.type_info.layout.size();
             let ptr = self.data.as_ptr();
             // Safe because we're offsetting inside of the allocation
@@ -177,12 +192,16 @@ impl UntypedVec {
     pub fn swap_move_element_to_other_vec(&mut self, other: &mut UntypedVec, element: usize) {
         assert!(self.type_info == other.type_info);
         assert!(self.len > 0);
-        assert!(element < self.len / self.type_info.layout.size());
+        assert!(
+            self.type_info.layout.size() == 0 || element < self.len / self.type_info.layout.size()
+        );
 
         let data: *mut MaybeUninit<u8> = self.data.as_ptr() as *mut MaybeUninit<u8>;
 
-        //if byte_index == self.len - self.type_info.layout.size() {
-        if element == self.len / self.type_info.layout.size() - 1 {
+        if self.type_info.layout.size() == 0 {
+            self.len -= 1;
+            other.len += 1;
+        } else if element == self.len / self.type_info.layout.size() - 1 {
             // Safe because we're offsetting inside the allocation and len is never >= isize::MAX
             let to_move = unsafe { data.offset((element * self.type_info.layout.size()) as isize) };
 
@@ -219,11 +238,16 @@ impl UntypedVec {
 
     pub fn swap_remove(&mut self, element: usize) {
         assert!(self.len > 0);
-        assert!(element < self.len / self.type_info.layout.size());
+
+        assert!(
+            self.type_info.layout.size() == 0 || element < self.len / self.type_info.layout.size()
+        );
 
         let data = self.data.as_ptr() as *mut MaybeUninit<u8>;
 
-        if element == self.len / self.type_info.layout.size() - 1 {
+        if self.type_info.layout.size() == 0
+            || element == self.len / self.type_info.layout.size() - 1
+        {
             self.pop();
         } else {
             // Safe because we're offsetting inside the allocation and len is never >= isize::MAX
@@ -246,13 +270,16 @@ impl UntypedVec {
         assert!(TypeInfo::new::<T>() == self.type_info);
         assert!(self.len % self.type_info.layout.size() == 0);
 
+        let slice_len = if self.type_info.layout.size() == 0 {
+            self.len
+        } else {
+            self.len / self.type_info.layout.size()
+        };
+
         unsafe {
             // Safe because we've really failed our job as an untyped vec if the data isnt aligned to T and size of T
             // The size of len * mem::size_of::<T>() cannot be > isize::MAX as we limit the capacity of our vec to less than isize::MAX
-            std::slice::from_raw_parts(
-                self.data.as_ptr() as *const T,
-                self.len / self.type_info.layout.size(),
-            )
+            std::slice::from_raw_parts(self.data.as_ptr() as *const T, slice_len)
         }
     }
 
@@ -260,20 +287,23 @@ impl UntypedVec {
         assert!(TypeInfo::new::<T>() == self.type_info);
         assert!(self.len % self.type_info.layout.size() == 0);
 
+        let slice_len = if self.type_info.layout.size() == 0 {
+            self.len
+        } else {
+            self.len / self.type_info.layout.size()
+        };
+
         unsafe {
             // Safe because we've really failed our job as an untyped vec if the data isnt aligned to T and size of T
             // The size of len * mem::size_of::<T>() cannot be > isize::MAX as we limit the capacity of our vec to less than isize::MAX
-            std::slice::from_raw_parts_mut(
-                self.data.as_ptr() as *mut T,
-                self.len / self.type_info.layout.size(),
-            )
+            std::slice::from_raw_parts_mut(self.data.as_ptr() as *mut T, slice_len)
         }
     }
 }
 
 impl Drop for UntypedVec {
     fn drop(&mut self) {
-        if self.cap != 0 {
+        if self.cap > 0 {
             while self.pop() {}
 
             let layout = Layout::from_size_align(self.cap, self.type_info.layout.align()).unwrap();
