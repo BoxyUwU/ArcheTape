@@ -62,11 +62,12 @@ impl<'w, T: TupleEntry> EntityBuilder<'w, T> {
 
         if let Some(archetype_idx) = world.find_archetype(&type_ids) {
             world.archetypes[archetype_idx].spawn(entity, components);
+            world.add_entity_to_sparse_array(entity, archetype_idx);
         } else {
             let archetype = crate::world::Archetype::new(entity, components);
             world.archetypes.push(archetype);
+            world.add_entity_to_sparse_array(entity, world.archetypes.len() - 1);
         }
-        world.add_entity_to_sparse_array(entity, world.archetypes.len() - 1);
 
         for id in &type_ids {
             if !world.lock_lookup.contains_key(id) {

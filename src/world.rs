@@ -112,7 +112,7 @@ impl Archetype {
 }
 
 pub struct World {
-    pub(crate) archetypes: Vec<Archetype>,
+    pub archetypes: Vec<Archetype>,
     entities: Entities,
     cache: Vec<(Vec<TypeId>, usize)>,
 
@@ -166,10 +166,10 @@ impl World {
             }
         }
 
-        let position = self
-            .archetypes
-            .iter()
-            .position(|archetype| archetype.type_ids == type_ids);
+        let position = self.archetypes.iter().position(|archetype| {
+            archetype.type_ids.len() == type_ids.len()
+                && type_ids.iter().all(|id| archetype.type_ids.contains(id))
+        });
 
         if let Some(position) = position {
             if self.cache.len() > 8 {
