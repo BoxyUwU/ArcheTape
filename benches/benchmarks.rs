@@ -1,6 +1,8 @@
 use criterion::*;
+use ellecs::spawn;
 
 pub mod frag_iter_20_padding_20 {
+    use super::spawn;
     use ellecs::world::World;
 
     pub struct Data(f32);
@@ -22,7 +24,7 @@ pub mod frag_iter_20_padding_20 {
             )*
 
             fn spawn_entity<T: 'static>(world: &mut World, data: T) {
-                world.spawn((data, $($y(2.),)* Data(1.)));
+                spawn!(&mut world, data, $($y(2.),)* Data(1.));
             }
         };
     }
@@ -71,6 +73,7 @@ pub mod frag_iter_20_padding_20 {
 }
 
 pub mod frag_iter_2000 {
+    use ellecs::spawn;
     use ellecs::world::World;
 
     pub struct Data(f32);
@@ -83,7 +86,7 @@ pub mod frag_iter_2000 {
 
             $(
                 for _ in 0..2000 {
-                    $world.spawn(($x(0.), Data(1.)));
+                    spawn!(&mut $world, $x(0.), Data(1.));
                 }
             )*
         };
@@ -109,6 +112,7 @@ pub mod frag_iter_2000 {
 }
 
 pub mod frag_iter_200 {
+    use ellecs::spawn;
     use ellecs::world::World;
 
     pub struct Data(f32);
@@ -121,7 +125,7 @@ pub mod frag_iter_200 {
 
             $(
                 for _ in 0..200 {
-                    $world.spawn(($x(0.), Data(1.)));
+                    spawn!(&mut $world, $x(0.), Data(1.));
                 }
             )*
         };
@@ -147,6 +151,7 @@ pub mod frag_iter_200 {
 }
 
 pub mod frag_iter_20 {
+    use ellecs::spawn;
     use ellecs::world::World;
 
     pub struct Data(f32);
@@ -159,7 +164,7 @@ pub mod frag_iter_20 {
 
             $(
                 for _ in 0..20 {
-                    $world.spawn(($x(0.), Data(1.)));
+                    spawn!(&mut $world, $x(0.), Data(1.));
                 }
             )*
         };
@@ -186,6 +191,7 @@ pub mod frag_iter_20 {
 
 pub mod simple_iter {
     use cgmath::*;
+    use ellecs::spawn;
     use ellecs::world::World;
 
     #[derive(Copy, Clone)]
@@ -204,12 +210,13 @@ pub mod simple_iter {
             let mut world = World::new();
 
             for _ in 0..10_000 {
-                world.spawn((
+                spawn!(
+                    &mut world,
                     Transform(Matrix4::from_scale(1.0)),
                     Position(Vector3::unit_x()),
                     Rotation(Vector3::unit_x()),
                     Velocity(Vector3::unit_x()),
-                ));
+                );
             }
 
             Benchmark(world)
@@ -228,6 +235,7 @@ pub mod simple_iter {
 
 pub mod simple_insert {
     use cgmath::*;
+    use ellecs::spawn;
     use ellecs::world::World;
 
     #[derive(Copy, Clone)]
@@ -250,12 +258,13 @@ pub mod simple_insert {
             let mut world = World::new();
 
             for _ in 0..10_000 {
-                world.spawn((
+                spawn!(
+                    &mut world,
                     Transform(Matrix4::from_scale(1.0)),
                     Position(Vector3::unit_x()),
                     Rotation(Vector3::unit_x()),
                     Velocity(Vector3::unit_x()),
-                ));
+                );
             }
         }
     }
@@ -263,6 +272,7 @@ pub mod simple_insert {
 
 pub mod frag_insert {
     use cgmath::*;
+    use ellecs::spawn;
     use ellecs::world::World;
 
     macro_rules! setup {
@@ -273,13 +283,13 @@ pub mod frag_insert {
 
             $(
                 for _ in 0..1_000 {
-                    $world.spawn((
+                    spawn!(&mut $world,
                         Transform(Matrix4::from_scale(1.0)),
                         Position(Vector3::unit_x()),
                         Rotation(Vector3::unit_x()),
                         Velocity(Vector3::unit_x()),
                         $x(1.),
-                    ));
+                    );
                 }
             )*
         }
@@ -311,6 +321,7 @@ pub mod frag_insert {
 }
 
 pub mod simple_large_iter {
+    use ellecs::spawn;
     use ellecs::world::World;
 
     pub struct A(f32);
@@ -328,7 +339,17 @@ pub mod simple_large_iter {
         pub fn new() -> Self {
             let mut world = World::new();
             for _ in 0..10_000 {
-                world.spawn((A(1.), B(1.), C(1.), D(1.), E(1.), F(1.), G(1.), H(1.)));
+                spawn!(
+                    &mut world,
+                    A(1.),
+                    B(1.),
+                    C(1.),
+                    D(1.),
+                    E(1.),
+                    F(1.),
+                    G(1.),
+                    H(1.),
+                );
             }
             Benchmark(world)
         }
@@ -349,6 +370,7 @@ pub mod simple_large_iter {
 
 pub mod add_remove {
     use ellecs::entities::Entity;
+    use ellecs::spawn;
     use ellecs::world::World;
 
     #[derive(Copy, Clone)]
@@ -364,7 +386,7 @@ pub mod add_remove {
             let mut entities = Vec::with_capacity(10000);
 
             for _ in 0..10_000 {
-                entities.push(world.spawn((A(1.),)));
+                entities.push(spawn!(&mut world, A(1.)));
             }
 
             Benchmark(world, entities.into_boxed_slice())
@@ -381,8 +403,91 @@ pub mod add_remove {
     }
 }
 
+pub mod get {
+    use ellecs::entities::Entity;
+    use ellecs::spawn;
+    use ellecs::world::World;
+
+    pub struct A(f32);
+
+    pub struct Benchmark(World, Box<[Entity]>);
+
+    impl Benchmark {
+        pub fn new() -> Self {
+            let mut world = World::new();
+            let mut entities = Vec::with_capacity(10_000);
+
+            for _ in 0..10_000 {
+                let entity = spawn!(&mut world, A(10.0));
+                entities.push(entity);
+            }
+
+            Benchmark(world, entities.into_boxed_slice())
+        }
+
+        pub fn run(&mut self) {
+            for &entity in self.1.iter() {
+                let a = self.0.get_component_mut::<A>(entity);
+                criterion::black_box(a);
+            }
+        }
+    }
+}
+
+pub mod padded_get {
+    use ellecs::entities::Entity;
+    use ellecs::spawn;
+    use ellecs::world::World;
+
+    pub struct Data(f32);
+
+    macro_rules! create_entities {
+        ($world:ident; $entities:ident; $($dummy:ident),*) => {
+            $(pub struct $dummy(f32);)*
+
+            for _ in 0..10_000 {
+                let entity = spawn!(&mut $world, $($dummy(1.0)),*);
+                $entities.push(entity);
+
+                $world.add_component(entity, Data(10.0));
+            }
+        };
+    }
+
+    pub struct Benchmark(World, Box<[Entity]>);
+
+    impl Benchmark {
+        pub fn new() -> Self {
+            let mut world = World::new();
+            let mut entities = Vec::with_capacity(10_000);
+            create_entities!(world; entities; A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z);
+
+            Benchmark(world, entities.into_boxed_slice())
+        }
+
+        pub fn run(&mut self) {
+            for &entity in self.1.iter() {
+                let data: &mut Data = self.0.get_component_mut(entity).unwrap();
+                criterion::black_box(data);
+            }
+        }
+    }
+}
+
 pub fn ellecs(c: &mut Criterion) {
     let mut group = c.benchmark_group("ellecs");
+    group.bench_function("padded_get", |b| {
+        let mut bench = padded_get::Benchmark::new();
+        b.iter(move || bench.run());
+    });
+    group.bench_function("get", |b| {
+        let mut bench = get::Benchmark::new();
+        b.iter(move || bench.run());
+    });
+    group.bench_function("simple_iter", |b| {
+        let mut bench = simple_iter::Benchmark::new();
+        b.iter(move || bench.run());
+    });
     group.bench_function("frag_iter_20_entity", |b| {
         let mut bench = frag_iter_20::Benchmark::new();
         b.iter(move || bench.run());
@@ -397,10 +502,6 @@ pub fn ellecs(c: &mut Criterion) {
     });
     group.bench_function("frag_iter_2000_entity", |b| {
         let mut bench = frag_iter_2000::Benchmark::new();
-        b.iter(move || bench.run());
-    });
-    group.bench_function("simple_iter", |b| {
-        let mut bench = simple_iter::Benchmark::new();
         b.iter(move || bench.run());
     });
     group.bench_function("simple_large_iter", |b| {

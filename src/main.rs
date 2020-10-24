@@ -1,62 +1,34 @@
+use cgmath::*;
 use ellecs::world::World;
 
-pub struct Data(f32);
-
-macro_rules! setup {
-    ($world:ident, (bloat: ($($y:ident,)*)), ($($x:ident),*)) => {
-        $(
-            pub struct $x(f32);
-        )*
-
-        $(
-            pub struct $y(f32);
-        )*
-
-        $(
-            for _ in 0..20 {
-                spawn_entity(&mut $world, $x);
-            }
-        )*
-
-        fn spawn_entity<T: 'static>(world: &mut World, data: T) {
-            world.spawn((data, $($y(2.),)* Data(1.)));
-        }
-    };
-}
+#[derive(Copy, Clone)]
+struct Transform(Matrix4<f32>);
+#[derive(Copy, Clone)]
+struct Position(Vector3<f32>);
+#[derive(Copy, Clone)]
+struct Rotation(Vector3<f32>);
+#[derive(Copy, Clone)]
+struct Velocity(Vector3<f32>);
 
 pub fn main() {
     let mut world = World::new();
-    setup!(
-        world,
-        (bloat:
-            (
-                Bloat1,
-                Bloat2,
-                Bloat3,
-                Bloat4,
-                Bloat5,
-                Bloat6,
-                Bloat7,
-                Bloat8,
-                Bloat9,
-                Bloat10,
-                Bloat11,
-                Bloat12,
-                Bloat13,
-                Bloat14,
-                Bloat15,
-                Bloat16,
-                Bloat17,
-                Bloat18,
-                Bloat19,
-                Bloat20,
-            )),
-        (A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z)
-    );
 
-    for _ in 0..10_000_000 {
-        world.query::<(&mut Data,)>().borrow().for_each(|(data,)| {
-            data.0 *= 2.;
-        });
+    for _ in 0..10_000 {
+        world
+            .spawn()
+            .with(Transform(Matrix4::from_scale(1.0)))
+            .with(Position(Vector3::unit_x()))
+            .with(Rotation(Vector3::unit_x()))
+            .with(Velocity(Vector3::unit_x()))
+            .build();
+    }
+
+    for _ in 0..1_000_000 {
+        world
+            .query::<(&mut Position, &mut Velocity)>()
+            .borrow()
+            .for_each(|(pos, vel)| {
+                pos.0 += vel.0;
+            });
     }
 }

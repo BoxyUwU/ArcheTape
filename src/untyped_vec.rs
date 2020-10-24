@@ -1,6 +1,7 @@
 use std::{
     alloc::{alloc, dealloc, realloc, Layout},
     any::TypeId,
+    mem::ManuallyDrop,
     mem::MaybeUninit,
     ptr::NonNull,
 };
@@ -113,7 +114,7 @@ impl UntypedVec {
         }
     }
 
-    /// The data at src must be `mem::forget` after calling this function unless the data is Copy as the data will have been copied to the vec
+    /// The data at src must not be used after calling this function
     ///
     /// The data at src should be NonNull, aligned to type_info.layout.align() and should be the size given by type_info.layout.size()
     ///
@@ -152,13 +153,13 @@ impl UntypedVec {
         let type_info = TypeInfo::new::<T>();
         assert!(type_info == self.type_info);
 
-        let ptr = &data as *const T as *const MaybeUninit<u8>;
+        let data = ManuallyDrop::new(data);
+        let ptr = &data as *const ManuallyDrop<T> as *const MaybeUninit<u8>;
         unsafe {
             // Safe because we assert that the UntypedVec's TypeInfo is the same as T's TypeInfo
             // Safe because T must be aligned and a valid instance because that's how rust works
-            // Safe because we forget the data behind ptr
+            // Safe because we put data in a ManuallyDrop the data behind ptr
             self.push_raw(ptr, type_info);
-            std::mem::forget(data);
         }
     }
 
@@ -228,7 +229,7 @@ impl UntypedVec {
             unsafe {
                 // Safe because we assert that the type_info for self and other are the same.
                 // Safe because we assert that byte_index is aligned to self.type_info.layout.align()
-                // Safe because we reduce the length of this vec by one which is effectively mem::forget
+                // Safe because we reduce the length of this vec by one which means we wont touch the data again
                 other.push_raw(to_swap, self.type_info);
             }
 
@@ -248,6 +249,7 @@ impl UntypedVec {
         if self.type_info.layout.size() == 0
             || element == self.len / self.type_info.layout.size() - 1
         {
+            assert!(self.len > element);
             self.pop();
         } else {
             // Safe because we're offsetting inside the allocation and len is never >= isize::MAX
@@ -354,13 +356,12 @@ mod tests {
         let mut untyped_vec = UntypedVec::new::<u32>();
 
         let data = 10_u32;
+        let data = ManuallyDrop::new(data);
         unsafe {
             untyped_vec.push_raw(
-                &data as *const u32 as *const MaybeUninit<u8>,
+                &data as *const ManuallyDrop<u32> as *const MaybeUninit<u8>,
                 TypeInfo::new::<u32>(),
             );
-
-            std::mem::forget(data);
         }
 
         assert!(untyped_vec.len == 4);
@@ -373,13 +374,12 @@ mod tests {
 
         for n in 0..4 {
             let data = 10_u32;
+            let data = ManuallyDrop::new(data);
             unsafe {
                 untyped_vec.push_raw(
-                    &data as *const u32 as *const MaybeUninit<u8>,
+                    &data as *const ManuallyDrop<u32> as *const MaybeUninit<u8>,
                     TypeInfo::new::<u32>(),
                 );
-
-                std::mem::forget(data);
             }
 
             assert!(untyped_vec.len == (n + 1) * 4);
@@ -387,13 +387,12 @@ mod tests {
         }
 
         let data = 10_u32;
+        let data = ManuallyDrop::new(data);
         unsafe {
             untyped_vec.push_raw(
-                &data as *const u32 as *const MaybeUninit<u8>,
+                &data as *const ManuallyDrop<u32> as *const MaybeUninit<u8>,
                 TypeInfo::new::<u32>(),
             );
-
-            std::mem::forget(data);
         }
 
         assert!(untyped_vec.len == 20);
@@ -411,14 +410,7 @@ mod tests {
         let mut untyped_vec = UntypedVec::new::<u32>();
 
         let data = 10_u32;
-        unsafe {
-            untyped_vec.push_raw(
-                &data as *const u32 as *const MaybeUninit<u8>,
-                TypeInfo::new::<u32>(),
-            );
-
-            std::mem::forget(data);
-        }
+        untyped_vec.push(data);
 
         let slice = untyped_vec.as_slice::<u32>();
         assert!(slice.len() == 1);
@@ -430,14 +422,7 @@ mod tests {
         let mut untyped_vec = UntypedVec::new::<u32>();
 
         let data = 10_u32;
-        unsafe {
-            untyped_vec.push_raw(
-                &data as *const u32 as *const MaybeUninit<u8>,
-                TypeInfo::new::<u32>(),
-            );
-
-            std::mem::forget(data);
-        }
+        untyped_vec.push(data);
 
         assert!(untyped_vec.pop());
         assert!(untyped_vec.len == 0);
@@ -459,14 +444,7 @@ mod tests {
         let mut untyped_vec = UntypedVec::new::<Wrap>();
 
         let data = Wrap(10, &mut dropped as *mut bool);
-        unsafe {
-            untyped_vec.push_raw(
-                &data as *const Wrap as *const MaybeUninit<u8>,
-                TypeInfo::new::<Wrap>(),
-            );
-
-            std::mem::forget(data);
-        }
+        untyped_vec.push(data);
 
         assert!(untyped_vec.pop());
         assert!(dropped);
@@ -486,14 +464,7 @@ mod tests {
         let mut untyped_vec = UntypedVec::new::<Wrap>();
 
         let data = Wrap(10, &mut dropped as *mut bool);
-        unsafe {
-            untyped_vec.push_raw(
-                &data as *const Wrap as *const MaybeUninit<u8>,
-                TypeInfo::new::<Wrap>(),
-            );
-
-            std::mem::forget(data);
-        }
+        untyped_vec.push(data);
 
         drop(untyped_vec);
         assert!(dropped);
@@ -510,16 +481,8 @@ mod tests {
         }
 
         let mut untyped_vec_1 = UntypedVec::new::<Wrap>();
-        unsafe {
-            let data = Wrap(10, &mut dropped as *mut bool);
-
-            untyped_vec_1.push_raw(
-                &data as *const Wrap as *const MaybeUninit<u8>,
-                TypeInfo::new::<Wrap>(),
-            );
-
-            std::mem::forget(data);
-        }
+        let data = Wrap(10, &mut dropped as *mut bool);
+        untyped_vec_1.push(data);
 
         let mut untyped_vec_2 = UntypedVec::new::<Wrap>();
 
@@ -544,27 +507,11 @@ mod tests {
         }
 
         let mut untyped_vec_1 = UntypedVec::new::<Wrap>();
-        unsafe {
-            let data = Wrap(10, &mut dropped_1 as *mut bool);
+        let data = Wrap(10, &mut dropped_1 as *mut bool);
+        untyped_vec_1.push(data);
 
-            untyped_vec_1.push_raw(
-                &data as *const Wrap as *const MaybeUninit<u8>,
-                TypeInfo::new::<Wrap>(),
-            );
-
-            std::mem::forget(data);
-        }
-
-        unsafe {
-            let data = Wrap(12, &mut dropped_2 as *mut bool);
-
-            untyped_vec_1.push_raw(
-                &data as *const Wrap as *const MaybeUninit<u8>,
-                TypeInfo::new::<Wrap>(),
-            );
-
-            std::mem::forget(data);
-        }
+        let data = Wrap(12, &mut dropped_2 as *mut bool);
+        untyped_vec_1.push(data);
 
         let mut untyped_vec_2 = UntypedVec::new::<Wrap>();
 
@@ -591,16 +538,8 @@ mod tests {
         }
 
         let mut untyped_vec = UntypedVec::new::<Wrap>();
-        unsafe {
-            let data = Wrap(10, &mut dropped as *mut bool);
-
-            untyped_vec.push_raw(
-                &data as *const Wrap as *const MaybeUninit<u8>,
-                TypeInfo::new::<Wrap>(),
-            );
-
-            std::mem::forget(data);
-        }
+        let data = Wrap(10, &mut dropped as *mut bool);
+        untyped_vec.push(data);
 
         untyped_vec.swap_remove(0);
 

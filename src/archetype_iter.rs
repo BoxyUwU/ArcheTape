@@ -30,8 +30,8 @@ pub struct QueryBorrow<
     U: StorageBorrows<'b, T>,
     Locks: 'guard,
 > {
-    storage_Borrows: Vec<U>,
-    locks: Locks,
+    storage_borrows: Vec<U>,
+    _locks: Locks,
     phantom: PhantomData<&'b T>,
     phantom2: PhantomData<&'guard ()>,
 }
@@ -60,8 +60,8 @@ macro_rules! impl_query_infos {
                 }
 
                 QueryBorrow {
-                    storage_Borrows: borrows,
-                    locks,
+                    storage_borrows: borrows,
+                    _locks: locks,
                     phantom: PhantomData,
                     phantom2: PhantomData,
                 }
@@ -84,7 +84,7 @@ macro_rules! impl_query_infos {
 
         impl<'b, 'guard: 'b, $($x: Borrow<'b, 'guard>,)*> QueryBorrow<'b, 'guard, ($($x,)*), ($(<$x as Borrow<'b, 'guard>>::StorageBorrow,)*), ($($x::Lock,)*)> {
             pub fn for_each_mut<Func: FnMut(($($x::Returns,)*))>(&'b mut self, mut func: Func) {
-                for guards in self.storage_Borrows.iter_mut() {
+                for guards in self.storage_borrows.iter_mut() {
                     let iter = <($(
                         $x::Iter,
                     )*) as Iters<($($x,)*)>>::iter_from_guards(guards);
@@ -97,7 +97,7 @@ macro_rules! impl_query_infos {
             }
 
             pub fn for_each<Func: Fn(($($x::Returns,)*))>(&'b mut self, func: Func) {
-                for guards in self.storage_Borrows.iter_mut() {
+                for guards in self.storage_borrows.iter_mut() {
                     let iter = <($(
                         $x::Iter,
                     )*) as Iters<($($x,)*)>>::iter_from_guards(guards);
@@ -410,14 +410,15 @@ unsafe impl<'b, 'guard: 'b> Borrow<'b, 'guard> for Entities {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spawn;
 
     #[test]
     fn for_each_mut() {
         let mut world = World::new();
 
-        world.spawn((10_u32, 12_u64));
-        world.spawn((15_u32, 14_u64));
-        world.spawn((20_u32, 16_u64));
+        spawn!(&mut world, 10_u32, 12_u64);
+        spawn!(&mut world, 15_u32, 14_u64);
+        spawn!(&mut world, 20_u32, 16_u64);
 
         let query = world.query::<(&mut u32, &u64)>();
         let mut checks = vec![(10, 12), (15, 14), (20, 16)].into_iter();
@@ -431,9 +432,9 @@ mod tests {
     fn for_each_iterator() {
         let mut world = World::new();
 
-        world.spawn((10_u32, 12_u64));
-        world.spawn((15_u32, 14_u64));
-        world.spawn((20_u32, 16_u64));
+        spawn!(&mut world, 10_u32, 12_u64);
+        spawn!(&mut world, 15_u32, 14_u64);
+        spawn!(&mut world, 20_u32, 16_u64);
 
         let query = world.query::<(&mut u32, &u64)>();
 
@@ -448,9 +449,9 @@ mod tests {
     fn for_each_subset_iterator() {
         let mut world = World::new();
 
-        world.spawn((10_u32, 12_u64));
-        world.spawn((15_u32, 14_u64));
-        world.spawn((20_u32, 16_u64));
+        spawn!(&mut world, 10_u32, 12_u64);
+        spawn!(&mut world, 15_u32, 14_u64);
+        spawn!(&mut world, 20_u32, 16_u64);
 
         let query = world.query::<(&mut u32,)>();
 
@@ -465,13 +466,13 @@ mod tests {
     fn for_each_multi_archetype_iterator() {
         let mut world = World::new();
 
-        world.spawn((10_u32, 12_u64));
-        world.spawn((15_u32, 14_u64));
-        world.spawn((20_u32, 16_u64));
+        spawn!(&mut world, 10_u32, 12_u64);
+        spawn!(&mut world, 15_u32, 14_u64);
+        spawn!(&mut world, 20_u32, 16_u64);
 
-        world.spawn((11_u32, 12_u64, 99_u128));
-        world.spawn((16_u32, 14_u64, 99_u128));
-        world.spawn((21_u32, 16_u64, 99_u128));
+        spawn!(&mut world, 11_u32, 12_u64, 99_u128);
+        spawn!(&mut world, 16_u32, 14_u64, 99_u128);
+        spawn!(&mut world, 21_u32, 16_u64, 99_u128);
 
         let query = world.query::<(&mut u32,)>();
 
@@ -485,7 +486,7 @@ mod tests {
     #[test]
     fn query_param_in_func() {
         let mut world = World::new();
-        world.spawn((10_u32, 12_u64));
+        spawn!(&mut world, 10_u32, 12_u64);
         let query = world.query::<(&u32, &u64)>();
 
         fn func(query: Query<(&u32, &u64)>) {
@@ -504,7 +505,8 @@ mod tests {
     #[test]
     fn entity_query() {
         let mut world = World::new();
-        world.spawn((1_u32, 12_u64));
+
+        spawn!(&mut world, 1_u32, 12_u64);
 
         let query = world.query::<(Entities, &u32, &u64)>();
 

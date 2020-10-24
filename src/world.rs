@@ -1,31 +1,82 @@
-use super::anymap::{AnyMap, AnyMapBorrow, AnyMapBorrowMut};
 use super::archetype_iter::{Query, QueryInfos};
-use super::bundle::Bundle;
 use super::entities::{Entities, Entity};
-use super::lifetime_anymap::{LifetimeAnyMap, LifetimeAnyMapBorrow, LifetimeAnyMapBorrowMut};
 use super::sparse_array::SparseArray;
 use super::untyped_vec::UntypedVec;
 use std::any::TypeId;
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
-use std::error::Error;
 use std::sync::RwLock;
 
 const PAGE_SIZE: usize = 256;
 
 pub struct Archetype {
     pub sparse: SparseArray<usize, PAGE_SIZE>,
-
-    pub lookup: HashMap<TypeId, usize, crate::anymap::TypeIdHasherBuilder>,
-
     pub type_ids: Vec<TypeId>,
+    pub lookup: HashMap<TypeId, usize, crate::TypeIdHasherBuilder>,
+
     pub entities: Vec<Entity>,
     pub component_storages: Vec<UnsafeCell<UntypedVec>>,
 }
 
+use crate::entity_builder::TupleEntry;
+
 impl Archetype {
-    pub fn new<T: Bundle>() -> Archetype {
-        T::new_archetype()
+    pub fn new<T: TupleEntry>(entity: Entity, tuple: T) -> Self {
+        fn new_recursive<T: TupleEntry>(
+            entity: Entity,
+            tuple: T,
+            mut type_ids: Vec<TypeId>,
+            mut untyped_vecs: Vec<UnsafeCell<UntypedVec>>,
+            mut lookup: HashMap<TypeId, usize, crate::TypeIdHasherBuilder>,
+        ) -> Archetype {
+            if let Some((left, right)) = tuple.next() {
+                type_ids.push(TypeId::of::<T::Left>());
+                let mut untyped_vec = UntypedVec::new::<T::Left>();
+                untyped_vec.push(left);
+                untyped_vecs.push(UnsafeCell::new(untyped_vec));
+                lookup.insert(TypeId::of::<T::Left>(), untyped_vecs.len() - 1);
+                return new_recursive(entity, right, type_ids, untyped_vecs, lookup);
+            }
+
+            let mut sparse = SparseArray::new();
+            sparse.insert(entity.index() as usize, 0);
+
+            // We're at the bottom of the tuple
+            Archetype {
+                sparse,
+                type_ids,
+                lookup,
+
+                entities: vec![entity],
+                component_storages: untyped_vecs,
+            }
+        }
+
+        new_recursive(
+            entity,
+            tuple,
+            Vec::new(),
+            Vec::new(),
+            HashMap::with_hasher(crate::TypeIdHasherBuilder()),
+        )
+    }
+
+    pub fn spawn<T: TupleEntry>(&mut self, entity: Entity, tuple: T) {
+        self.entities.push(entity);
+        self.sparse
+            .insert(entity.index() as usize, self.entities.len() - 1);
+
+        fn insert_recursive<T: TupleEntry>(archetype: &mut Archetype, entity: Entity, tuple: T) {
+            if let Some((left, right)) = tuple.next() {
+                let storage_idx = archetype.lookup[&TypeId::of::<T::Left>()];
+                let storage = archetype.component_storages[storage_idx].get_mut();
+                storage.push(left);
+
+                insert_recursive(archetype, entity, right);
+            }
+        }
+
+        insert_recursive(self, entity, tuple);
     }
 
     pub fn from_archetype(from: &mut Archetype) -> Archetype {
@@ -48,10 +99,6 @@ impl Archetype {
         }
     }
 
-    pub fn spawn<T: Bundle>(&mut self, components: T, entity: Entity) {
-        components.add_to_archetype(self, entity);
-    }
-
     pub fn despawn(&mut self, entity: Entity) -> bool {
         if let Some(idx) = self.sparse.remove(entity.uindex()) {
             self.entities.remove(idx);
@@ -66,7 +113,6 @@ impl Archetype {
 
 pub struct World {
     pub(crate) archetypes: Vec<Archetype>,
-    owned_resources: AnyMap,
     entities: Entities,
     cache: Vec<(Vec<TypeId>, usize)>,
 
@@ -80,7 +126,6 @@ impl World {
     pub fn new() -> Self {
         Self {
             archetypes: Vec::new(),
-            owned_resources: AnyMap::new(),
             entities: Entities::new(),
             cache: Vec::with_capacity(8),
             entity_to_archetype: SparseArray::with_capacity(32),
@@ -136,23 +181,6 @@ impl World {
         position
     }
 
-    pub fn find_archetype_or_insert<T: Bundle>(&mut self, type_ids: &[TypeId]) -> usize {
-        debug_assert!(T::type_ids() == type_ids);
-
-        self.find_archetype(type_ids).unwrap_or_else(|| {
-            for id in type_ids {
-                if !self.lock_lookup.contains_key(id) {
-                    self.lock_lookup.insert(*id, self.locks.len());
-                    self.locks.push(RwLock::new(()));
-                }
-            }
-
-            self.cache.clear();
-            self.archetypes.push(T::new_archetype());
-            self.archetypes.len() - 1
-        })
-    }
-
     pub fn query_archetypes<T: QueryInfos>(&self) -> impl Iterator<Item = usize> + '_ {
         let type_ids = T::type_ids();
         self.archetypes
@@ -171,20 +199,15 @@ impl World {
             .map(|(n, _)| n)
     }
 
-    pub fn spawn<T: Bundle>(&mut self, bundle: T) -> Entity {
+    pub fn spawn(&mut self) -> crate::entity_builder::EntityBuilder {
         let entity = self.entities.spawn();
 
-        let type_ids = T::type_ids();
-        let archetype_idx = self.find_archetype_or_insert::<T>(&type_ids);
-
-        self.add_entity_to_sparse_array(entity, archetype_idx);
-
-        self.archetypes
-            .get_mut(archetype_idx)
-            .unwrap()
-            .spawn(bundle, entity);
-
-        entity
+        crate::entity_builder::EntityBuilder {
+            entity,
+            world: self,
+            type_ids: Vec::new(),
+            components: (),
+        }
     }
 
     pub fn despawn(&mut self, entity: Entity) -> bool {
@@ -409,139 +432,48 @@ impl World {
         );
     }
 
-    pub fn run(&mut self) -> RunWorldContext {
-        RunWorldContext {
-            world: self,
-            temp_resources: LifetimeAnyMap::new(),
-        }
-    }
-}
+    pub fn get_component_mut<T: 'static>(&mut self, entity: Entity) -> Option<&mut T> {
+        self.entities.is_alive(entity).then_some(())?;
 
-pub struct RunWorldContext<'run> {
-    world: &'run mut World,
-    temp_resources: LifetimeAnyMap<'run>,
-}
+        let archetype_idx = self.find_archetype_from_entity(entity)?;
+        let archetype = &mut self.archetypes[archetype_idx];
 
-impl<'run> RunWorldContext<'run> {
-    pub fn insert_owned_resource<T: 'static>(&mut self, data: T) {
-        self.world.owned_resources.insert(data);
-    }
+        let component_type_id = TypeId::of::<T>();
+        let component_storage_idx = archetype.lookup[&component_type_id];
 
-    pub fn get_owned_resource<'a, T: 'static>(
-        &'a self,
-    ) -> Result<AnyMapBorrow<'a, T>, Box<dyn Error + 'a>> {
-        self.world.owned_resources.get()
-    }
+        let entity_idx = *archetype.sparse.get(entity.index() as usize)?;
 
-    pub fn get_owned_resource_mut<'a, T: 'static>(
-        &'a self,
-    ) -> Result<AnyMapBorrowMut<'a, T>, Box<dyn Error + 'a>> {
-        self.world.owned_resources.get_mut()
-    }
-
-    pub fn insert_temp_resource<'a, T: 'static>(&'a mut self, resource: &'run mut T) {
-        self.temp_resources.insert(resource);
-    }
-
-    pub fn get_temp_resource<'a, T: 'static>(
-        &'a self,
-    ) -> Result<LifetimeAnyMapBorrow<'a, T>, Box<dyn Error + 'a>> {
-        self.temp_resources.get()
-    }
-
-    pub fn get_temp_resource_mut<'a, T: 'static>(
-        &'a self,
-    ) -> Result<LifetimeAnyMapBorrowMut<'a, T>, Box<dyn Error + 'a>> {
-        self.temp_resources.get_mut()
+        let component_storage = &mut archetype.component_storages[component_storage_idx];
+        let component_storage = component_storage.get_mut();
+        let component_storage = component_storage.as_slice_mut::<T>();
+        Some(&mut component_storage[entity_idx])
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spawn;
 
     #[test]
-    pub fn borrow_temp_resource_mut() {
+    pub fn get() {
         let mut world = World::new();
 
-        let mut run_ctx = world.run();
-        let mut foo = 10_u32;
-        run_ctx.insert_temp_resource(&mut foo);
+        let entity = spawn!(&mut world, 10_u32, 12_u64, "Hello");
+        let entity2 = spawn!(&mut world, 18_u32, "AWDAWDAWD", 16.0f32);
 
-        let mut foo_borrow = run_ctx.get_temp_resource_mut::<u32>().unwrap();
-        *foo_borrow += 1;
-    }
+        let str_comp: &mut &str = world.get_component_mut(entity).unwrap();
+        assert!(*str_comp == "Hello");
 
-    #[test]
-    pub fn borrow_temp_resource() {
-        let mut world = World::new();
-
-        let mut run_ctx = world.run();
-        let mut foo = 10_u32;
-        run_ctx.insert_temp_resource(&mut foo);
-
-        run_ctx.get_temp_resource::<u32>().unwrap();
-    }
-
-    #[test]
-    pub fn borrow_temp_resource_mut_twice() {
-        let mut world = World::new();
-
-        let mut run_ctx = world.run();
-        let mut foo = 10_u32;
-
-        run_ctx.insert_temp_resource(&mut foo);
-
-        let _borrow_1 = run_ctx.get_temp_resource_mut::<u32>().unwrap();
-        assert!(run_ctx.get_temp_resource_mut::<u32>().is_err());
-    }
-
-    #[test]
-    pub fn borrow_temp_resource_twice() {
-        let mut world = World::new();
-
-        let mut run_ctx = world.run();
-        let mut foo = 10_u32;
-
-        run_ctx.insert_temp_resource(&mut foo);
-
-        let _1 = run_ctx.get_temp_resource::<u32>().unwrap();
-        let _2 = run_ctx.get_temp_resource::<u32>().unwrap();
-    }
-
-    #[test]
-    pub fn borrow_temp_resource_shared_and_mut() {
-        let mut world = World::new();
-
-        let mut run_ctx = world.run();
-        let mut foo = 10_u32;
-
-        run_ctx.insert_temp_resource(&mut foo);
-
-        let _borrow_1 = run_ctx.get_temp_resource::<u32>().unwrap();
-        assert!(run_ctx.get_temp_resource_mut::<u32>().is_err());
-    }
-
-    #[test]
-    pub fn multi_borrow() {
-        let mut world = World::new();
-
-        let mut run_ctx = world.run();
-        let mut foo = 10_u32;
-
-        run_ctx.insert_temp_resource(&mut foo);
-
-        run_ctx.get_temp_resource_mut::<u32>().unwrap();
-        run_ctx.get_temp_resource_mut::<u32>().unwrap();
-        run_ctx.get_temp_resource_mut::<u32>().unwrap();
-        run_ctx.get_temp_resource_mut::<u32>().unwrap();
+        let str_comp: &mut &str = world.get_component_mut(entity2).unwrap();
+        assert!(*str_comp == "AWDAWDAWD");
     }
 
     #[test]
     pub fn entity_archetype_lookup() {
         let mut world = World::new();
 
-        let entity = world.spawn((10_u32, 12_u64));
+        let entity = spawn!(&mut world, 10_u32, 12_u64);
 
         assert!(*world.entity_to_archetype.get(entity.uindex()).unwrap() == 0);
     }
@@ -549,7 +481,7 @@ mod tests {
     #[test]
     pub fn add_component() {
         let mut world = World::new();
-        let entity = world.spawn((1_u32,));
+        let entity = spawn!(&mut world, 1_u32);
         world.add_component(entity, 2_u64);
 
         assert!(world.archetypes.len() == 2);
@@ -582,10 +514,10 @@ mod tests {
     #[test]
     pub fn add_component_then_spawn() {
         let mut world = World::new();
-        let entity = world.spawn((1_u32,));
+        let entity = spawn!(&mut world, 1_u32);
         world.add_component(entity, 2_u64);
 
-        let entity2 = world.spawn((3_u32, 4_u64));
+        let entity2 = spawn!(&mut world, 3_u32, 4_u64);
 
         assert!(world.archetypes.len() == 2);
         assert!(*world.entity_to_archetype.get(entity.uindex()).unwrap() == 1);
@@ -623,8 +555,8 @@ mod tests {
         struct B(f32);
 
         let mut world = World::new();
-        let entity_1 = world.spawn((A(1.),));
-        let entity_2 = world.spawn((A(1.),));
+        let entity_1 = spawn!(&mut world, A(1.));
+        let entity_2 = spawn!(&mut world, A(1.));
 
         assert!(world.archetypes[0].entities[0] == entity_1);
         assert!(world.archetypes[0].entities[1] == entity_2);
@@ -650,14 +582,14 @@ mod tests {
         let mut entities = Vec::with_capacity(500);
 
         for _ in 0..10 {
-            entities.push(world.spawn((A(1.),)));
+            entities.push(spawn!(&mut world, A(1.)));
         }
 
         for &entity in entities.iter() {
             world.add_component(entity, B(1.));
         }
-        //for &entity in entities.iter() {
-        //    world.remove_component::<B>(entity);
-        //}
+        for &entity in entities.iter() {
+            world.remove_component::<B>(entity);
+        }
     }
 }
