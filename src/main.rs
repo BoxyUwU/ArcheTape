@@ -1,21 +1,26 @@
 use cgmath::*;
 use ellecs::spawn;
 use ellecs::world::World;
-pub struct Benchmark(World);
+
+#[derive(Copy, Clone)]
+struct Transform(Matrix4<f32>);
+#[derive(Copy, Clone)]
+struct Position(Vector3<f32>);
+#[derive(Copy, Clone)]
+struct Rotation(Vector3<f32>);
+#[derive(Copy, Clone)]
+struct Velocity(Vector3<f32>);
 
 fn main() {
-    pub struct A(f32);
-
     let mut world = World::new();
-    let mut entities = Vec::with_capacity(10_000);
 
-    for _ in 0..10_000 {
-        let entity = spawn!(&mut world, A(10.0));
-        entities.push(entity);
-        world.add_component(entity, "test");
-    }
-
-    for &entity in entities.iter() {
-        world.get_component_mut::<A>(entity).unwrap();
+    for _ in 0..1_000_000 {
+        spawn!(
+            &mut world,
+            Transform(Matrix4::from_scale(1.0)),
+            Position(Vector3::unit_x()),
+            Rotation(Vector3::unit_x()),
+            Velocity(Vector3::unit_x()),
+        );
     }
 }

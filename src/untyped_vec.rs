@@ -9,7 +9,7 @@ use std::{
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct TypeInfo {
     pub id: TypeId,
-    layout: Layout,
+    pub layout: Layout,
 }
 
 impl TypeInfo {
@@ -80,6 +80,10 @@ impl UntypedVec {
         self.len / self.type_info.layout.size()
     }
 
+    pub fn raw_len(&self) -> usize {
+        self.len
+    }
+
     pub fn realloc(&mut self) {
         if self.type_info.layout.size() == 0 {
             panic!("Attempted to reallocate an UntypedVec who's data is size 0");
@@ -122,9 +126,9 @@ impl UntypedVec {
     ///
     /// Type_info passed in must be the same as the type_info used to create the UntypedVec
     #[allow(unused_unsafe)]
-    pub unsafe fn push_raw(&mut self, src: *const MaybeUninit<u8>, type_info: TypeInfo) {
-        assert!(type_info == self.type_info);
-        assert!(src.is_null() == false);
+    pub unsafe fn push_raw(&mut self, src: *mut MaybeUninit<u8>, type_info: TypeInfo) {
+        debug_assert!(type_info == self.type_info);
+        debug_assert!(src.is_null() == false);
 
         if self.type_info.layout.size() == 0 {
             self.len += 1;
@@ -153,8 +157,8 @@ impl UntypedVec {
         let type_info = TypeInfo::new::<T>();
         assert!(type_info == self.type_info);
 
-        let data = ManuallyDrop::new(data);
-        let ptr = &data as *const ManuallyDrop<T> as *const MaybeUninit<u8>;
+        let mut data = ManuallyDrop::new(data);
+        let ptr = &mut data as *mut ManuallyDrop<T> as *mut MaybeUninit<u8>;
         unsafe {
             // Safe because we assert that the UntypedVec's TypeInfo is the same as T's TypeInfo
             // Safe because T must be aligned and a valid instance because that's how rust works
@@ -356,10 +360,10 @@ mod tests {
         let mut untyped_vec = UntypedVec::new::<u32>();
 
         let data = 10_u32;
-        let data = ManuallyDrop::new(data);
+        let mut data = ManuallyDrop::new(data);
         unsafe {
             untyped_vec.push_raw(
-                &data as *const ManuallyDrop<u32> as *const MaybeUninit<u8>,
+                &mut data as *mut ManuallyDrop<u32> as *mut MaybeUninit<u8>,
                 TypeInfo::new::<u32>(),
             );
         }
@@ -374,10 +378,10 @@ mod tests {
 
         for n in 0..4 {
             let data = 10_u32;
-            let data = ManuallyDrop::new(data);
+            let mut data = ManuallyDrop::new(data);
             unsafe {
                 untyped_vec.push_raw(
-                    &data as *const ManuallyDrop<u32> as *const MaybeUninit<u8>,
+                    &mut data as *mut ManuallyDrop<u32> as *mut MaybeUninit<u8>,
                     TypeInfo::new::<u32>(),
                 );
             }
@@ -387,10 +391,10 @@ mod tests {
         }
 
         let data = 10_u32;
-        let data = ManuallyDrop::new(data);
+        let mut data = ManuallyDrop::new(data);
         unsafe {
             untyped_vec.push_raw(
-                &data as *const ManuallyDrop<u32> as *const MaybeUninit<u8>,
+                &mut data as *mut ManuallyDrop<u32> as *mut MaybeUninit<u8>,
                 TypeInfo::new::<u32>(),
             );
         }

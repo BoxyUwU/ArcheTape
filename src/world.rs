@@ -61,24 +61,6 @@ impl Archetype {
         )
     }
 
-    pub fn spawn<T: TupleEntry>(&mut self, entity: Entity, tuple: T) {
-        self.entities.push(entity);
-        self.sparse
-            .insert(entity.index() as usize, self.entities.len() - 1);
-
-        fn insert_recursive<T: TupleEntry>(archetype: &mut Archetype, entity: Entity, tuple: T) {
-            if let Some((left, right)) = tuple.next() {
-                let storage_idx = archetype.lookup[&TypeId::of::<T::Left>()];
-                let storage = archetype.component_storages[storage_idx].get_mut();
-                storage.push(left);
-
-                insert_recursive(archetype, entity, right);
-            }
-        }
-
-        insert_recursive(self, entity, tuple);
-    }
-
     pub fn from_archetype(from: &mut Archetype) -> Archetype {
         Archetype {
             sparse: SparseArray::new(),
@@ -205,7 +187,7 @@ impl World {
         crate::entity_builder::EntityBuilder {
             entity,
             world: self,
-            type_ids: Vec::new(),
+            components_len: 0,
             components: (),
         }
     }
