@@ -163,6 +163,43 @@ impl World {
         position
     }
 
+    pub fn find_archetype_no_cache(
+        &self,
+        type_ids: &[TypeId],
+        extra_id: Option<TypeId>,
+    ) -> Option<usize> {
+        let is_extra = if extra_id.is_some() { 1 } else { 0 };
+        let position = self.archetypes.iter().position(|archetype| {
+            archetype.type_ids.len() == type_ids.len() + is_extra
+                && type_ids.iter().all(|id| archetype.type_ids.contains(id))
+                && {
+                    if let Some(extra_id) = extra_id {
+                        archetype.type_ids.contains(&extra_id)
+                    } else {
+                        true
+                    }
+                }
+        });
+
+        position
+    }
+
+    pub fn find_archetype_without_no_cache(
+        &self,
+        type_ids: &[TypeId],
+        without_id: TypeId,
+    ) -> Option<usize> {
+        let position = self.archetypes.iter().position(|archetype| {
+            archetype.type_ids.len() == type_ids.len() - 1
+                && archetype
+                    .type_ids
+                    .iter()
+                    .all(|id| *id != without_id && type_ids.contains(id))
+        });
+
+        position
+    }
+
     pub fn query_archetypes<T: QueryInfos>(&self) -> impl Iterator<Item = usize> + '_ {
         let type_ids = T::type_ids();
         self.archetypes
@@ -210,17 +247,14 @@ impl World {
         }
 
         let current_archetype = self.find_archetype_from_entity(entity).unwrap();
-        let type_ids = self.archetypes[current_archetype].type_ids.clone();
-        let remove_index = type_ids
+        let current_type_ids = &self.archetypes[current_archetype].type_ids;
+        let remove_index = current_type_ids
             .iter()
             .position(|&id| id == TypeId::of::<T>())
             .unwrap();
 
-        let mut target_type_ids = type_ids.clone();
-        target_type_ids.swap_remove(remove_index);
-
         let target_archetype_idx = self
-            .find_archetype(&target_type_ids)
+            .find_archetype_without_no_cache(current_type_ids, TypeId::of::<T>())
             .or_else(|| {
                 let mut archetype =
                     Archetype::from_archetype(&mut self.archetypes[current_archetype]);
@@ -311,27 +345,21 @@ impl World {
     }
 
     pub fn add_component<T: 'static>(&mut self, entity: Entity, component: T) {
-        if !self.lock_lookup.contains_key(&TypeId::of::<T>()) {
-            self.lock_lookup.insert(TypeId::of::<T>(), self.locks.len());
-            self.locks.push(RwLock::new(()));
-        }
-
         if !self.entities.is_alive(entity) {
             return;
         }
 
         let current_archetype_idx = *self.entity_to_archetype.get(entity.uindex()).unwrap();
-        let current_archetype = self.archetypes.get_mut(current_archetype_idx).unwrap();
-        let current_type_ids = current_archetype.type_ids.clone();
-
+        let current_archetype = self.archetypes.get(current_archetype_idx).unwrap();
+        let current_type_ids = &current_archetype.type_ids;
         assert!(!current_type_ids.contains(&TypeId::of::<T>()));
 
-        let mut target_type_ids = current_type_ids.clone();
-        target_type_ids.push(TypeId::of::<T>());
-
         let target_archetype_idx = self
-            .find_archetype(&target_type_ids)
+            .find_archetype_no_cache(current_type_ids, Some(TypeId::of::<T>()))
             .or_else(|| {
+                self.lock_lookup.insert(TypeId::of::<T>(), self.locks.len());
+                self.locks.push(RwLock::new(()));
+
                 let mut archetype =
                     Archetype::from_archetype(&mut self.archetypes[current_archetype_idx]);
 
