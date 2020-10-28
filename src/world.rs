@@ -2,13 +2,48 @@ use super::archetype_iter::{Query, QueryInfos};
 use super::entities::{Entities, Entity};
 use super::sparse_array::SparseArray;
 use super::untyped_vec::UntypedVec;
+use crate::array_vec::ArrayVec;
 use std::any::TypeId;
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
-const PAGE_SIZE: usize = 256;
+const CACHE_SIZE: usize = 4;
+pub struct AddRemoveCache {
+    cache: ArrayVec<(TypeId, usize), CACHE_SIZE>,
+    lookup: HashMap<TypeId, usize, crate::TypeIdHasherBuilder>,
+}
 
+impl AddRemoveCache {
+    fn new() -> Self {
+        Self {
+            cache: ArrayVec::new(),
+            lookup: HashMap::with_capacity_and_hasher(16, crate::TypeIdHasherBuilder()),
+        }
+    }
+
+    pub fn lookup_id(&mut self, type_id: TypeId) -> Option<usize> {
+        for (id, idx) in self.cache.as_slice() {
+            if *id == type_id {
+                return Some(*idx);
+            }
+        }
+
+        if let Some(idx) = self.lookup.get(&type_id) {
+            self.cache.push_start((type_id, *idx));
+            return Some(*idx);
+        }
+
+        None
+    }
+
+    pub fn insert_id(&mut self, id: TypeId, archetype: usize) {
+        self.cache.push_start((id, archetype));
+        self.lookup.insert(id, archetype);
+    }
+}
+
+const PAGE_SIZE: usize = 256;
 pub struct Archetype {
     /// Indexed by entity.index() and returns the index that its components are at inside of the UntypedVecs and
     /// also the index the entity is located at in the entities vec
@@ -29,6 +64,8 @@ pub struct Archetype {
     ///
     /// E.G. if there's an element TypeId::of::<T>() in this vec, then at the same index in component_storages will be the storage for component T
     pub(crate) type_ids: Vec<TypeId>,
+
+    pub(crate) add_remove_cache: AddRemoveCache,
 }
 
 use crate::entity_builder::TupleEntry;
@@ -64,6 +101,8 @@ impl Archetype {
 
                 entities: vec![entity],
                 component_storages: untyped_vecs,
+
+                add_remove_cache: AddRemoveCache::new(),
             }
         }
 
@@ -117,6 +156,7 @@ impl Archetype {
                 }
                 storages
             },
+            add_remove_cache: AddRemoveCache::new(),
         }
     }
 
@@ -210,6 +250,14 @@ impl Archetype {
             }
         }
         false
+    }
+
+    pub fn try_find_next_archetype(&mut self, id: TypeId) -> Option<usize> {
+        self.add_remove_cache.lookup_id(id)
+    }
+
+    pub fn insert_archetype_cache(&mut self, id: TypeId, archetype: usize) {
+        self.add_remove_cache.insert_id(id, archetype);
     }
 }
 
@@ -367,19 +415,44 @@ impl World {
         }
 
         let current_archetype_idx = self.find_archetype_from_entity(entity).unwrap();
-        let current_type_ids = &self.archetypes[current_archetype_idx].type_ids;
+        let current_archetype = &mut self.archetypes[current_archetype_idx];
+        // Note, this is important, caching will give us *wrong* results if we try and remove a component that isnt in this archetype
+        assert!(current_archetype.type_ids.contains(&TypeId::of::<T>()));
 
-        let target_archetype_idx = self
-            .find_archetype_without_id_no_cache(current_type_ids, TypeId::of::<T>())
+        let target_archetype_idx = current_archetype
+            .try_find_next_archetype(TypeId::of::<T>())
             .or_else(|| {
+                // Iterate every archeype to see if one exists
+                // TODO MAYBE: technically we dont need to iterate everything, we can calculate the exact archetype.type_ids the
+                // target archetype will have so we could store a hashmap of that -> archetype_idx in world to avoid this O(n) lookup
+
+                let current_archetype = &self.archetypes[current_archetype_idx];
+                let idx = self.find_archetype_without_id_no_cache(
+                    &current_archetype.type_ids,
+                    TypeId::of::<T>(),
+                );
+
+                if let Some(idx) = idx {
+                    let current_archetype = &mut self.archetypes[current_archetype_idx];
+                    current_archetype.insert_archetype_cache(TypeId::of::<T>(), idx);
+                }
+
+                idx
+            })
+            .unwrap_or_else(|| {
+                // Create a new archetype
+
                 let archetype = Archetype::from_archetype_without::<T>(
                     &mut self.archetypes[current_archetype_idx],
                 );
 
                 self.archetypes.push(archetype);
-                Some(self.archetypes.len() - 1)
-            })
-            .unwrap();
+
+                let archetypes_len = self.archetypes.len();
+                let current_archetype = &mut self.archetypes[current_archetype_idx];
+                current_archetype.insert_archetype_cache(TypeId::of::<T>(), archetypes_len - 1);
+                archetypes_len - 1
+            });
 
         let (current_archetype, target_archetype) = crate::index_twice_mut(
             current_archetype_idx,
@@ -461,13 +534,33 @@ impl World {
         }
 
         let current_archetype_idx = *self.entity_to_archetype.get(entity.uindex()).unwrap();
-        let current_archetype = self.archetypes.get(current_archetype_idx).unwrap();
-        let current_type_ids = &current_archetype.type_ids;
-        assert!(!current_type_ids.contains(&TypeId::of::<T>()));
+        let current_archetype = &mut self.archetypes[current_archetype_idx];
+        // Note, this is important, caching will give us *wrong* results if we try and add a component that is in this archetype
+        assert!(!current_archetype.type_ids.contains(&TypeId::of::<T>()));
 
-        let target_archetype_idx = self
-            .find_archetype_with_id_no_cache(current_type_ids, Some(TypeId::of::<T>()))
+        let target_archetype_idx = current_archetype
+            .try_find_next_archetype(TypeId::of::<T>())
             .or_else(|| {
+                // Iterate every archeype to see if one exists
+                // TODO MAYBE: technically we dont need to iterate everything, we can calculate the exact archetype.type_ids the
+                // target archetype will have so we could store a hashmap of that -> archetype_idx in world to avoid this O(n) lookup
+
+                let current_archetype = &self.archetypes[current_archetype_idx];
+                let idx = self.find_archetype_with_id_no_cache(
+                    &current_archetype.type_ids,
+                    Some(TypeId::of::<T>()),
+                );
+
+                if let Some(idx) = idx {
+                    let current_archetype = &mut self.archetypes[current_archetype_idx];
+                    current_archetype.insert_archetype_cache(TypeId::of::<T>(), idx);
+                }
+
+                idx
+            })
+            .unwrap_or_else(|| {
+                // Create a new archetype
+
                 self.lock_lookup.insert(TypeId::of::<T>(), self.locks.len());
                 self.locks.push(RwLock::new(()));
 
@@ -476,9 +569,12 @@ impl World {
                 );
 
                 self.archetypes.push(archetype);
-                Some(self.archetypes.len() - 1)
-            })
-            .unwrap();
+
+                let archetypes_len = self.archetypes.len();
+                let current_archetype = &mut self.archetypes[current_archetype_idx];
+                current_archetype.insert_archetype_cache(TypeId::of::<T>(), archetypes_len - 1);
+                archetypes_len - 1
+            });
 
         let (current_archetype, target_archetype) = crate::index_twice_mut(
             current_archetype_idx,

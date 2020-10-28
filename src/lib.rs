@@ -7,6 +7,7 @@
 pub use ellecs_macro::spawn;
 
 pub mod archetype_iter;
+pub mod array_vec;
 pub mod entities;
 pub mod entity_builder;
 pub mod sparse_array;
