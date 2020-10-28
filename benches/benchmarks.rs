@@ -403,6 +403,91 @@ pub mod add_remove {
     }
 }
 
+pub mod padded_add_remove {
+    use ellecs::entities::Entity;
+    use ellecs::spawn;
+    use ellecs::world::World;
+
+    struct Padding([u8; 1024]);
+    struct A(f32);
+    struct B(f32);
+
+    pub struct Benchmark(World, Box<[Entity]>);
+
+    impl Benchmark {
+        pub fn new() -> Self {
+            let mut world = World::new();
+            let mut entities = Vec::with_capacity(10000);
+
+            for _ in 0..10_000 {
+                entities.push(spawn!(&mut world, Padding([0; 1024]), A(1.)));
+            }
+
+            Benchmark(world, entities.into_boxed_slice())
+        }
+
+        pub fn run(&mut self) {
+            for &entity in self.1.iter() {
+                self.0.add_component(entity, B(1.));
+            }
+            for &entity in self.1.iter() {
+                self.0.remove_component::<B>(entity);
+            }
+        }
+    }
+}
+
+pub mod wide_add_remove {
+    use ellecs::entities::Entity;
+    use ellecs::spawn;
+    use ellecs::world::World;
+
+    struct P1([u8; 146]);
+    struct P2([u8; 146]);
+    struct P3([u8; 146]);
+    struct P4([u8; 146]);
+    struct P5([u8; 146]);
+    struct P6([u8; 146]);
+    struct P7([u8; 146]);
+
+    struct A(f32);
+    struct B(f32);
+
+    pub struct Benchmark(World, Box<[Entity]>);
+
+    impl Benchmark {
+        pub fn new() -> Self {
+            let mut world = World::new();
+            let mut entities = Vec::with_capacity(10000);
+
+            for _ in 0..10_000 {
+                entities.push(spawn!(
+                    &mut world,
+                    P1([1; 146]),
+                    P2([1; 146]),
+                    P3([1; 146]),
+                    P4([1; 146]),
+                    P5([1; 146]),
+                    P6([1; 146]),
+                    P7([1; 146]),
+                    A(0.0),
+                ));
+            }
+
+            Benchmark(world, entities.into_boxed_slice())
+        }
+
+        pub fn run(&mut self) {
+            for &entity in self.1.iter() {
+                self.0.add_component(entity, B(1.));
+            }
+            for &entity in self.1.iter() {
+                self.0.remove_component::<B>(entity);
+            }
+        }
+    }
+}
+
 pub mod get {
     use ellecs::entities::Entity;
     use ellecs::spawn;
@@ -478,6 +563,14 @@ pub fn ellecs(c: &mut Criterion) {
     let mut group = c.benchmark_group("ellecs");
     group.bench_function("add_remove_10_000", |b| {
         let mut bench = add_remove::Benchmark::new();
+        b.iter(move || bench.run());
+    });
+    group.bench_function("padded_add_remove_10_000", |b| {
+        let mut bench = padded_add_remove::Benchmark::new();
+        b.iter(move || bench.run());
+    });
+    group.bench_function("wide_remove_10_000", |b| {
+        let mut bench = wide_add_remove::Benchmark::new();
         b.iter(move || bench.run());
     });
     group.bench_function("padded_get", |b| {
