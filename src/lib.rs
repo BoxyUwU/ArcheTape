@@ -39,3 +39,27 @@ impl BuildHasher for TypeIdHasherBuilder {
         TypeIdHasher::default()
     }
 }
+
+pub fn index_twice_mut<T>(idx_1: usize, idx_2: usize, slice: &mut [T]) -> (&mut T, &mut T) {
+    if idx_1 < idx_2 {
+        let (left, right) = slice.split_at_mut(idx_2);
+        (left.get_mut(idx_1).unwrap(), right.first_mut().unwrap())
+    } else if idx_1 > idx_2 {
+        let (left, right) = slice.split_at_mut(idx_1);
+        (right.first_mut().unwrap(), left.get_mut(idx_2).unwrap())
+    } else {
+        panic!()
+    }
+}
+
+pub fn index_twice<T>(idx_1: usize, idx_2: usize, slice: &[T]) -> (&T, &T) {
+    if idx_1 < idx_2 {
+        let (left, right) = slice.split_at(idx_2);
+        (left.get(idx_1).unwrap(), right.first().unwrap())
+    } else if idx_1 > idx_2 {
+        let (left, right) = slice.split_at(idx_1);
+        (right.first().unwrap(), left.get(idx_2).unwrap())
+    } else {
+        panic!()
+    }
+}

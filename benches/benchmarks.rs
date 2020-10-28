@@ -476,6 +476,10 @@ pub mod padded_get {
 
 pub fn ellecs(c: &mut Criterion) {
     let mut group = c.benchmark_group("ellecs");
+    group.bench_function("add_remove_10_000", |b| {
+        let mut bench = add_remove::Benchmark::new();
+        b.iter(move || bench.run());
+    });
     group.bench_function("padded_get", |b| {
         let mut bench = padded_get::Benchmark::new();
         b.iter(move || bench.run());
@@ -514,10 +518,6 @@ pub fn ellecs(c: &mut Criterion) {
     });
     group.bench_function("frag_insert_1_000_x_26", |b| {
         let mut bench = frag_insert::Benchmark::new();
-        b.iter(move || bench.run());
-    });
-    group.bench_function("add_remove_10_000", |b| {
-        let mut bench = add_remove::Benchmark::new();
         b.iter(move || bench.run());
     });
 }

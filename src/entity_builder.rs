@@ -54,7 +54,6 @@ impl TupleEntry for () {
             .iter_mut()
             .map(|cell| cell.get_mut())
         {
-            //assert!(storage.len() == entities_len);
             let storage_len = storage.raw_len();
             let type_size = storage.get_type_info().layout.size();
             if type_size == 0 {

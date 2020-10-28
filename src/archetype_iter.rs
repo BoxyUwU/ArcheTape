@@ -287,6 +287,10 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
     fn borrow_storage(archetype: &'guard Archetype) -> Self::StorageBorrow {
         let type_id = TypeId::of::<T>();
 
+        // TODO this has really bad performance when there's lots of components in an archetype
+        // We really should use the .lookup[type_id] for those cases but that really badly affects
+        // perf in cases where there *arent* many components in the archetype... EVENTUALLY we should
+        // just cache the indices we need for a query rendering this all moot
         for (n, id) in archetype.type_ids.iter().enumerate() {
             if id == &type_id {
                 return unsafe { &*archetype.component_storages[n].get() };
@@ -340,6 +344,10 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
     fn borrow_storage(archetype: &'guard Archetype) -> Self::StorageBorrow {
         let type_id = TypeId::of::<T>();
 
+        // TODO this has really bad performance when there's lots of components in an archetype
+        // We really should use the .lookup[type_id] for those cases but that really badly affects
+        // perf in cases where there *arent* many components in the archetype... EVENTUALLY we should
+        // just cache the indices we need for a query rendering this all moot
         for (n, id) in archetype.type_ids.iter().enumerate() {
             if id == &type_id {
                 return unsafe { &mut *archetype.component_storages[n].get() };
