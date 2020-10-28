@@ -392,9 +392,9 @@ impl World {
         for ((_, current_storage), target_storage) in current_archetype
             .component_storages
             .iter_mut()
+            .map(|current_storage| current_storage.get_mut())
             .enumerate()
             .filter(|(n, current_storage)| {
-                let current_storage = unsafe { &*current_storage.get() };
                 if current_storage.get_type_info().id == TypeId::of::<T>() {
                     assert!(skipped_storage.is_none());
                     skipped_storage = Some(*n);
@@ -403,11 +403,13 @@ impl World {
                     true
                 }
             })
-            .zip(target_archetype.component_storages.iter_mut())
+            .zip(
+                target_archetype
+                    .component_storages
+                    .iter_mut()
+                    .map(|target_storage| target_storage.get_mut()),
+            )
         {
-            let current_storage = current_storage.get_mut();
-            let target_storage = target_storage.get_mut();
-
             current_storage.swap_move_element_to_other_vec(target_storage, entity_idx)
         }
 
