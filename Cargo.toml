@@ -8,6 +8,7 @@ repository = "https://github.com/EllenNyan/ArcheTape"
 keywords = ["gamedev", "ecs"]
 categories = ["Game Development", "Data Structures"]
 description = "arche-tape is an archetypal ECS"
+exclude = ["/benches"]
 
 [dependencies]
 
