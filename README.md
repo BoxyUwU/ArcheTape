@@ -1,2 +1,2 @@
 # ArcheTape
-Archetype ECS written in Rust
+An archetypal ECS written in nightly Rust
