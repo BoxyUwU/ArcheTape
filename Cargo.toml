@@ -1,13 +1,13 @@
 [package]
 name = "arche-tape"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Ellen Nyan"]
 edition = "2018"
 license = "MIT OR Apache-2.0 OR Zlib"
 repository = "https://github.com/EllenNyan/ArcheTape"
 homepage = "https://github.com/EllenNyan/ArcheTape"
 keywords = ["gamedev", "ecs"]
-categories = ["Game Development", "Data Structures"]
+categories = ["game-development", "data-structures"]
 description = "arche-tape is an archetypal ECS"
 readme = "README.md"
 
