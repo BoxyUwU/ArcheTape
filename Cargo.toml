@@ -3,7 +3,11 @@ name = "arche-tape"
 version = "0.1.0"
 authors = ["Ellen Nyan"]
 edition = "2018"
-license = "MIT"
+license = "MIT OR Apache-2.0 OR Zlib"
+repository = "https://github.com/EllenNyan/ArcheTape"
+keywords = ["gamedev", "ecs"]
+categories = ["Game Development", "Data Structures"]
+description = "arche-tape is an archetypal ECS"
 
 [dependencies]
 
