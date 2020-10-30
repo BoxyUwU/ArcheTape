@@ -5,10 +5,12 @@ authors = ["Ellen Nyan"]
 edition = "2018"
 license = "MIT OR Apache-2.0 OR Zlib"
 repository = "https://github.com/EllenNyan/ArcheTape"
+homepage = "https://github.com/EllenNyan/ArcheTape"
 keywords = ["gamedev", "ecs"]
 categories = ["Game Development", "Data Structures"]
 description = "arche-tape is an archetypal ECS"
 exclude = ["/benches"]
+readme = "README.md"
 
 [dependencies]
 
