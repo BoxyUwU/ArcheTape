@@ -1,9 +1,9 @@
+use arche_tape::spawn;
 use criterion::*;
-use ellecs::spawn;
 
 pub mod frag_iter_20_padding_20 {
     use super::spawn;
-    use ellecs::world::World;
+    use arche_tape::world::World;
 
     pub struct Data(f32);
 
@@ -73,8 +73,8 @@ pub mod frag_iter_20_padding_20 {
 }
 
 pub mod frag_iter_2000 {
-    use ellecs::spawn;
-    use ellecs::world::World;
+    use arche_tape::spawn;
+    use arche_tape::world::World;
 
     pub struct Data(f32);
 
@@ -112,8 +112,8 @@ pub mod frag_iter_2000 {
 }
 
 pub mod frag_iter_200 {
-    use ellecs::spawn;
-    use ellecs::world::World;
+    use arche_tape::spawn;
+    use arche_tape::world::World;
 
     pub struct Data(f32);
 
@@ -151,8 +151,8 @@ pub mod frag_iter_200 {
 }
 
 pub mod frag_iter_20 {
-    use ellecs::spawn;
-    use ellecs::world::World;
+    use arche_tape::spawn;
+    use arche_tape::world::World;
 
     pub struct Data(f32);
 
@@ -190,9 +190,9 @@ pub mod frag_iter_20 {
 }
 
 pub mod simple_iter {
+    use arche_tape::spawn;
+    use arche_tape::world::World;
     use cgmath::*;
-    use ellecs::spawn;
-    use ellecs::world::World;
 
     #[derive(Copy, Clone)]
     struct Transform(Matrix4<f32>);
@@ -234,9 +234,9 @@ pub mod simple_iter {
 }
 
 pub mod simple_insert {
+    use arche_tape::spawn;
+    use arche_tape::world::World;
     use cgmath::*;
-    use ellecs::spawn;
-    use ellecs::world::World;
 
     #[derive(Copy, Clone)]
     struct Transform(Matrix4<f32>);
@@ -271,9 +271,9 @@ pub mod simple_insert {
 }
 
 pub mod frag_insert {
+    use arche_tape::spawn;
+    use arche_tape::world::World;
     use cgmath::*;
-    use ellecs::spawn;
-    use ellecs::world::World;
 
     macro_rules! setup {
         ($world:ident, $($x:ident),*) => {
@@ -321,8 +321,8 @@ pub mod frag_insert {
 }
 
 pub mod simple_large_iter {
-    use ellecs::spawn;
-    use ellecs::world::World;
+    use arche_tape::spawn;
+    use arche_tape::world::World;
 
     pub struct A(f32);
     pub struct B(f32);
@@ -369,9 +369,9 @@ pub mod simple_large_iter {
 }
 
 pub mod add_remove {
-    use ellecs::entities::Entity;
-    use ellecs::spawn;
-    use ellecs::world::World;
+    use arche_tape::entities::Entity;
+    use arche_tape::spawn;
+    use arche_tape::world::World;
 
     #[derive(Copy, Clone)]
     struct A(f32);
@@ -404,9 +404,9 @@ pub mod add_remove {
 }
 
 pub mod padded_add_remove {
-    use ellecs::entities::Entity;
-    use ellecs::spawn;
-    use ellecs::world::World;
+    use arche_tape::entities::Entity;
+    use arche_tape::spawn;
+    use arche_tape::world::World;
 
     struct Padding([u8; 1024]);
     struct A(f32);
@@ -438,9 +438,9 @@ pub mod padded_add_remove {
 }
 
 pub mod wide_add_remove {
-    use ellecs::entities::Entity;
-    use ellecs::spawn;
-    use ellecs::world::World;
+    use arche_tape::entities::Entity;
+    use arche_tape::spawn;
+    use arche_tape::world::World;
 
     struct P1([u8; 146]);
     struct P2([u8; 146]);
@@ -489,9 +489,9 @@ pub mod wide_add_remove {
 }
 
 pub mod get {
-    use ellecs::entities::Entity;
-    use ellecs::spawn;
-    use ellecs::world::World;
+    use arche_tape::entities::Entity;
+    use arche_tape::spawn;
+    use arche_tape::world::World;
 
     pub struct A(f32);
 
@@ -520,9 +520,9 @@ pub mod get {
 }
 
 pub mod padded_get {
-    use ellecs::entities::Entity;
-    use ellecs::spawn;
-    use ellecs::world::World;
+    use arche_tape::entities::Entity;
+    use arche_tape::spawn;
+    use arche_tape::world::World;
 
     pub struct Data(f32);
 
@@ -559,8 +559,8 @@ pub mod padded_get {
     }
 }
 
-pub fn ellecs(c: &mut Criterion) {
-    let mut group = c.benchmark_group("ellecs");
+pub fn arche_tape(c: &mut Criterion) {
+    let mut group = c.benchmark_group("arche_tape");
     group.bench_function("add_remove_10_000", |b| {
         let mut bench = add_remove::Benchmark::new();
         b.iter(move || bench.run());
@@ -615,6 +615,6 @@ pub fn ellecs(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benchmarks, ellecs);
+criterion_group!(benchmarks, arche_tape);
 
 criterion_main!(benchmarks);

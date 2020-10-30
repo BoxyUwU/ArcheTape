@@ -206,7 +206,7 @@ impl UntypedVec {
         if self.type_info.layout.size() == 0 {
             self.len -= 1;
             other.len += 1;
-        } else if element == self.len / self.type_info.layout.size() - 1 {
+        } else if element == (self.len / self.type_info.layout.size()) - 1 {
             // Safe because we're offsetting inside the allocation and len is never >= isize::MAX
             let to_move = unsafe { data.offset((element * self.type_info.layout.size()) as isize) };
 

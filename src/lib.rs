@@ -2,9 +2,15 @@
 #![feature(min_const_generics)]
 #![feature(const_in_array_repeat_expressions)]
 #![feature(unsafe_cell_get_mut)]
-#![feature(bool_to_option)]
 
-pub use ellecs_macro::spawn;
+#[macro_export]
+macro_rules! spawn {
+    (&mut $world:ident, $($c:expr),* $(,)?) => {
+        $world.spawn()
+            $(.with($c))*
+            .build()
+    };
+}
 
 pub mod archetype_iter;
 pub mod array_vec;
