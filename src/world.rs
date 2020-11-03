@@ -1,6 +1,5 @@
 use super::archetype_iter::{Query, QueryInfos};
 use super::entities::{Entities, Entity};
-use super::sparse_array::SparseArray;
 use super::untyped_vec::UntypedVec;
 use crate::array_vec::ArrayVec;
 use std::any::TypeId;
@@ -42,13 +41,7 @@ impl AddRemoveCache {
         self.lookup.insert(id, archetype);
     }
 }
-
-const PAGE_SIZE: usize = 256;
 pub struct Archetype {
-    /// Indexed by entity.index() and returns the index that its components are at inside of the UntypedVecs and
-    /// also the index the entity is located at in the entities vec
-    pub(crate) sparse: SparseArray<usize, PAGE_SIZE>,
-
     /// A lookup of a component's TypeId to the index into component_storages/type_ids
     pub(crate) lookup: HashMap<TypeId, usize, crate::TypeIdHasherBuilder>,
 
@@ -85,14 +78,10 @@ impl Archetype {
                 return new_recursive(entity, right, type_ids, untyped_vecs);
             }
 
-            let mut sparse = SparseArray::new();
-            sparse.insert(entity.index() as usize, 0);
-
             let type_ids_len = type_ids.len();
 
             // We're at the bottom of the tuple
             Archetype {
-                sparse,
                 type_ids,
                 lookup: HashMap::with_capacity_and_hasher(
                     type_ids_len,
@@ -140,8 +129,6 @@ impl Archetype {
 
     pub fn from_archetype(from: &mut Archetype) -> Archetype {
         Archetype {
-            sparse: SparseArray::new(),
-
             lookup: from.lookup.clone(),
             type_ids: from.type_ids.clone(),
 
@@ -241,13 +228,11 @@ impl Archetype {
         base_archetype
     }
 
-    pub fn despawn(&mut self, entity: Entity) -> bool {
-        if let Some(idx) = self.sparse.remove(entity.uindex()) {
-            self.entities.remove(idx);
-            for lock in self.component_storages.iter_mut() {
-                let storage = lock.get_mut();
-                storage.swap_remove(idx);
-            }
+    pub fn despawn(&mut self, entity: Entity, entity_idx: usize) -> bool {
+        assert!(self.entities[entity_idx] == entity);
+        self.entities.swap_remove(entity_idx);
+        for storage in self.component_storages.iter_mut().map(UnsafeCell::get_mut) {
+            storage.swap_remove(entity_idx);
         }
         false
     }
@@ -261,12 +246,22 @@ impl Archetype {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub struct ArchIndex(pub usize);
+
+#[derive(Copy, Clone, Debug)]
+pub struct EntityMeta {
+    archetype: ArchIndex,
+    index: usize,
+}
+
 pub struct World {
     pub archetypes: Vec<Archetype>,
     entities: Entities,
     cache: Vec<(Vec<TypeId>, usize)>,
 
-    entity_to_archetype: SparseArray<usize, PAGE_SIZE>,
+    //entity_to_archetype: SparseArray<usize, PAGE_SIZE>,
+    entity_meta: Vec<Option<EntityMeta>>,
 
     pub(crate) lock_lookup: HashMap<TypeId, usize>,
     pub(crate) locks: Vec<RwLock<()>>,
@@ -278,30 +273,40 @@ impl World {
             archetypes: Vec::new(),
             entities: Entities::new(),
             cache: Vec::with_capacity(8),
-            entity_to_archetype: SparseArray::with_capacity(32),
+            //entity_to_archetype: SparseArray::with_capacity(32),
+            entity_meta: Vec::with_capacity(32),
 
             lock_lookup: HashMap::new(),
             locks: Vec::new(),
         }
     }
 
-    pub fn find_archetype_from_entity(&self, entity: Entity) -> Option<usize> {
+    pub fn get_entity_meta(&self, entity: Entity) -> Option<&EntityMeta> {
         if !self.entities.is_alive(entity) {
             return None;
         }
 
-        self.entity_to_archetype.get(entity.uindex()).copied()
+        self.entity_meta.get(entity.uindex())?.as_ref()
     }
 
-    pub fn add_entity_to_sparse_array(&mut self, entity: Entity, archetype: usize) {
+    pub fn set_entity_meta(&mut self, entity: Entity, archetype: ArchIndex, index: usize) {
         if self.entities.is_alive(entity) {
-            self.entity_to_archetype.insert(entity.uindex(), archetype);
+            let new_meta = Some(EntityMeta { archetype, index });
+            match self.entity_meta.get_mut(entity.uindex()) {
+                Some(old_meta) => *old_meta = new_meta,
+                None => {
+                    self.entity_meta.resize_with(entity.uindex(), || None);
+                    self.entity_meta.push(new_meta);
+                }
+            }
         }
     }
 
-    pub fn remove_entity_from_sparse_array(&mut self, entity: Entity) {
+    pub fn remove_entity_meta(&mut self, entity: Entity) {
         if self.entities.is_alive(entity) {
-            self.entity_to_archetype.remove(entity.uindex());
+            if let Some(meta) = self.entity_meta.get_mut(entity.uindex()) {
+                *meta = None;
+            }
         }
     }
 
@@ -309,10 +314,10 @@ impl World {
         Query::<T>::new(self)
     }
 
-    pub fn find_archetype(&mut self, type_ids: &[TypeId]) -> Option<usize> {
+    pub fn find_archetype(&mut self, type_ids: &[TypeId]) -> Option<ArchIndex> {
         for (cached_type_id, archetype) in self.cache.iter() {
             if *cached_type_id == type_ids {
-                return Some(*archetype);
+                return Some(*archetype).map(ArchIndex);
             }
         }
 
@@ -328,7 +333,7 @@ impl World {
             self.cache.insert(0, (Vec::from(type_ids), position));
         }
 
-        position
+        position.map(ArchIndex)
     }
 
     pub fn find_archetype_with_id_no_cache(
@@ -402,9 +407,13 @@ impl World {
             return false;
         }
 
-        let archetype = self.find_archetype_from_entity(entity).unwrap();
-        self.archetypes[archetype].despawn(entity);
-        self.remove_entity_from_sparse_array(entity);
+        let (archetype_idx, entity_idx) = {
+            let meta = self.get_entity_meta(entity).unwrap();
+            (meta.archetype.clone(), meta.index)
+        };
+
+        self.archetypes[archetype_idx.0].despawn(entity, entity_idx);
+        self.remove_entity_meta(entity);
         self.entities.despawn(entity);
         true
     }
@@ -414,8 +423,11 @@ impl World {
             return;
         }
 
-        let current_archetype_idx = self.find_archetype_from_entity(entity).unwrap();
-        let current_archetype = &mut self.archetypes[current_archetype_idx];
+        let (current_archetype_idx, entity_idx) = {
+            let meta = self.get_entity_meta(entity).unwrap();
+            (meta.archetype.clone(), meta.index)
+        };
+        let current_archetype = &mut self.archetypes[current_archetype_idx.0];
         // Note, this is important, caching will give us *wrong* results if we try and remove a component that isnt in this archetype
         assert!(current_archetype.type_ids.contains(&TypeId::of::<T>()));
 
@@ -426,42 +438,42 @@ impl World {
                 // TODO MAYBE: technically we dont need to iterate everything, we can calculate the exact archetype.type_ids the
                 // target archetype will have so we could store a hashmap of that -> archetype_idx in world to avoid this O(n) lookup
 
-                let current_archetype = &self.archetypes[current_archetype_idx];
+                let current_archetype = &self.archetypes[current_archetype_idx.0];
                 let idx = self.find_archetype_without_id_no_cache(
                     &current_archetype.type_ids,
                     TypeId::of::<T>(),
                 );
 
                 if let Some(idx) = idx {
-                    let current_archetype = &mut self.archetypes[current_archetype_idx];
+                    let current_archetype = &mut self.archetypes[current_archetype_idx.0];
                     current_archetype.insert_archetype_cache(TypeId::of::<T>(), idx);
                 }
 
                 idx
             })
+            .map(|idx| ArchIndex(idx))
             .unwrap_or_else(|| {
                 // Create a new archetype
 
                 let archetype = Archetype::from_archetype_without::<T>(
-                    &mut self.archetypes[current_archetype_idx],
+                    &mut self.archetypes[current_archetype_idx.0],
                 );
 
                 self.archetypes.push(archetype);
 
                 let archetypes_len = self.archetypes.len();
-                let current_archetype = &mut self.archetypes[current_archetype_idx];
+                let current_archetype = &mut self.archetypes[current_archetype_idx.0];
                 current_archetype.insert_archetype_cache(TypeId::of::<T>(), archetypes_len - 1);
-                archetypes_len - 1
+                ArchIndex(archetypes_len - 1)
             });
 
         let (current_archetype, target_archetype) = crate::index_twice_mut(
-            current_archetype_idx,
-            target_archetype_idx,
+            current_archetype_idx.0,
+            target_archetype_idx.0,
             &mut self.archetypes,
         );
 
         let mut skipped_storage = None;
-        let entity_idx = *current_archetype.sparse.get(entity.uindex()).unwrap();
         for ((_, current_storage), target_storage) in current_archetype
             .component_storages
             .iter_mut()
@@ -504,28 +516,19 @@ impl World {
             .get_mut()
             .swap_remove(entity_idx);
 
-        *self.entity_to_archetype.get_mut(entity.uindex()).unwrap() = target_archetype_idx;
+        target_archetype.entities.push(entity);
+        self.entity_meta[entity.uindex()] = Some(EntityMeta {
+            archetype: target_archetype_idx,
+            index: target_archetype.entities.len() - 1,
+        });
 
         current_archetype.entities.swap_remove(entity_idx);
-        current_archetype.sparse.remove(entity.uindex()).unwrap();
-        if current_archetype.entities.len() > 0 && current_archetype.entities.len() != entity_idx {
-            let entity = current_archetype.entities[entity_idx];
-            *current_archetype.sparse.get_mut(entity.uindex()).unwrap() = entity_idx;
+        if let Some(&swapped_entity) = current_archetype.entities.get(entity_idx) {
+            self.entity_meta[swapped_entity.uindex()]
+                .as_mut()
+                .unwrap()
+                .index = entity_idx;
         }
-
-        target_archetype.entities.push(entity);
-        let target_archetype_components_len = target_archetype.entities.len();
-        debug_assert!(target_archetype
-            .component_storages
-            .iter_mut()
-            .map(|storage| storage.get_mut())
-            .all(|storage| {
-                assert!(target_archetype_components_len == storage.len());
-                true
-            }));
-        target_archetype
-            .sparse
-            .insert(entity.uindex(), target_archetype_components_len - 1);
     }
 
     pub fn add_component<T: 'static>(&mut self, entity: Entity, component: T) {
@@ -533,8 +536,11 @@ impl World {
             return;
         }
 
-        let current_archetype_idx = *self.entity_to_archetype.get(entity.uindex()).unwrap();
-        let current_archetype = &mut self.archetypes[current_archetype_idx];
+        let (current_archetype_idx, entity_idx) = {
+            let meta = self.get_entity_meta(entity).unwrap();
+            (meta.archetype.clone(), meta.index)
+        };
+        let current_archetype = &mut self.archetypes[current_archetype_idx.0];
         // Note, this is important, caching will give us *wrong* results if we try and add a component that is in this archetype
         assert!(!current_archetype.type_ids.contains(&TypeId::of::<T>()));
 
@@ -545,19 +551,20 @@ impl World {
                 // TODO MAYBE: technically we dont need to iterate everything, we can calculate the exact archetype.type_ids the
                 // target archetype will have so we could store a hashmap of that -> archetype_idx in world to avoid this O(n) lookup
 
-                let current_archetype = &self.archetypes[current_archetype_idx];
+                let current_archetype = &self.archetypes[current_archetype_idx.0];
                 let idx = self.find_archetype_with_id_no_cache(
                     &current_archetype.type_ids,
                     Some(TypeId::of::<T>()),
                 );
 
                 if let Some(idx) = idx {
-                    let current_archetype = &mut self.archetypes[current_archetype_idx];
+                    let current_archetype = &mut self.archetypes[current_archetype_idx.0];
                     current_archetype.insert_archetype_cache(TypeId::of::<T>(), idx);
                 }
 
                 idx
             })
+            .map(|idx| ArchIndex(idx))
             .unwrap_or_else(|| {
                 // Create a new archetype
 
@@ -565,25 +572,24 @@ impl World {
                 self.locks.push(RwLock::new(()));
 
                 let archetype = Archetype::from_archetype_with::<T>(
-                    &mut self.archetypes[current_archetype_idx],
+                    &mut self.archetypes[current_archetype_idx.0],
                 );
 
                 self.archetypes.push(archetype);
 
                 let archetypes_len = self.archetypes.len();
-                let current_archetype = &mut self.archetypes[current_archetype_idx];
+                let current_archetype = &mut self.archetypes[current_archetype_idx.0];
                 current_archetype.insert_archetype_cache(TypeId::of::<T>(), archetypes_len - 1);
-                archetypes_len - 1
+                ArchIndex(archetypes_len - 1)
             });
 
         let (current_archetype, target_archetype) = crate::index_twice_mut(
-            current_archetype_idx,
-            target_archetype_idx,
+            current_archetype_idx.0,
+            target_archetype_idx.0,
             &mut self.archetypes,
         );
 
         let mut skipped_idx = None;
-        let entity_idx = *current_archetype.sparse.get(entity.uindex()).unwrap();
         for (current_storage, (_, target_storage)) in current_archetype
             .component_storages
             .iter_mut()
@@ -626,29 +632,19 @@ impl World {
             .get_mut()
             .push(component);
 
-        *self.entity_to_archetype.get_mut(entity.uindex()).unwrap() = target_archetype_idx;
+        target_archetype.entities.push(entity);
+        self.entity_meta[entity.uindex()] = Some(EntityMeta {
+            archetype: target_archetype_idx,
+            index: target_archetype.entities.len() - 1,
+        });
 
         current_archetype.entities.swap_remove(entity_idx);
-        current_archetype.sparse.remove(entity.uindex()).unwrap();
-        if current_archetype.entities.len() > 0 && current_archetype.entities.len() != entity_idx {
-            let entity = current_archetype.entities[entity_idx];
-            *current_archetype.sparse.get_mut(entity.uindex()).unwrap() = entity_idx;
+        if let Some(&removed_entity) = current_archetype.entities.get(entity_idx) {
+            self.entity_meta[removed_entity.uindex()]
+                .as_mut()
+                .unwrap()
+                .index = entity_idx;
         }
-
-        target_archetype.entities.push(entity);
-
-        let target_archetype_components_len = target_archetype.entities.len();
-        debug_assert!(target_archetype
-            .component_storages
-            .iter_mut()
-            .map(|storage| storage.get_mut())
-            .all(|storage| {
-                assert!(target_archetype_components_len == storage.len());
-                true
-            }));
-        target_archetype
-            .sparse
-            .insert(entity.uindex(), target_archetype_components_len - 1);
     }
 
     pub fn get_component_mut<T: 'static>(&mut self, entity: Entity) -> Option<&mut T> {
@@ -656,17 +652,18 @@ impl World {
             return None;
         }
 
-        let archetype_idx = self.find_archetype_from_entity(entity)?;
-        let archetype = &mut self.archetypes[archetype_idx];
+        let (archetype_idx, entity_idx) = {
+            let meta = self.get_entity_meta(entity)?;
+            (meta.archetype.clone(), meta.index)
+        };
+        let archetype = &mut self.archetypes[archetype_idx.0];
 
         let component_type_id = TypeId::of::<T>();
         let component_storage_idx = archetype.lookup[&component_type_id];
 
-        let entity_idx = *archetype.sparse.get(entity.index() as usize)?;
-
-        let component_storage = &mut archetype.component_storages[component_storage_idx];
-        let component_storage = component_storage.get_mut();
-        let component_storage = component_storage.as_slice_mut::<T>();
+        let component_storage = archetype.component_storages[component_storage_idx]
+            .get_mut()
+            .as_slice_mut::<T>();
         Some(&mut component_storage[entity_idx])
     }
 }
@@ -696,7 +693,9 @@ mod tests {
 
         let entity = spawn!(&mut world, 10_u32, 12_u64);
 
-        assert!(*world.entity_to_archetype.get(entity.uindex()).unwrap() == 0);
+        let entity_meta = world.entity_meta[entity.uindex()].unwrap();
+        assert!(entity_meta.index == 0);
+        assert!(entity_meta.archetype.0 == 0);
     }
 
     #[test]
@@ -706,16 +705,16 @@ mod tests {
         world.add_component(entity, 2_u64);
 
         assert!(world.archetypes.len() == 2);
-        assert!(*world.entity_to_archetype.get(entity.uindex()).unwrap() == 1);
+        let entity_meta = world.entity_meta[entity.uindex()].unwrap();
+        assert!(entity_meta.archetype.0 == 1);
+        assert!(entity_meta.index == 0);
 
-        assert!(world.archetypes[0].sparse.get(entity.uindex()).is_none());
         assert!(world.archetypes[0].entities.len() == 0);
         for lock in world.archetypes[0].component_storages.iter_mut() {
             let storage = lock.get_mut();
             assert!(storage.len() == 0);
         }
 
-        assert!(*world.archetypes[1].sparse.get(entity.uindex()).unwrap() == 0);
         assert!(world.archetypes[1].entities.len() == 1);
         for lock in world.archetypes[1].component_storages.iter_mut() {
             let storage = lock.get_mut();
@@ -741,19 +740,23 @@ mod tests {
         let entity2 = spawn!(&mut world, 3_u32, 4_u64);
 
         assert!(world.archetypes.len() == 2);
-        assert!(*world.entity_to_archetype.get(entity.uindex()).unwrap() == 1);
-        assert!(*world.entity_to_archetype.get(entity2.uindex()).unwrap() == 1);
+        assert!(world.archetypes[1].entities[0] == entity);
+        assert!(world.archetypes[1].entities[1] == entity2);
 
-        assert!(world.archetypes[0].sparse.get(entity.uindex()).is_none());
-        assert!(world.archetypes[0].sparse.get(entity2.uindex()).is_none());
+        let entity_meta = world.entity_meta[entity.uindex()].unwrap();
+        assert!(entity_meta.archetype.0 == 1);
+        assert!(entity_meta.index == 0);
+
+        let entity_meta = world.entity_meta[entity2.uindex()].unwrap();
+        assert!(entity_meta.archetype.0 == 1);
+        assert!(entity_meta.index == 1);
+
         assert!(world.archetypes[0].entities.len() == 0);
         for lock in world.archetypes[0].component_storages.iter_mut() {
             let storage = lock.get_mut();
             assert!(storage.len() == 0);
         }
 
-        assert!(*world.archetypes[1].sparse.get(entity.uindex()).unwrap() == 0);
-        assert!(*world.archetypes[1].sparse.get(entity2.uindex()).unwrap() == 1);
         assert!(world.archetypes[1].entities.len() == 2);
         for lock in world.archetypes[1].component_storages.iter_mut() {
             let storage = lock.get_mut();
@@ -779,19 +782,43 @@ mod tests {
         let entity_1 = spawn!(&mut world, A(1.));
         let entity_2 = spawn!(&mut world, A(1.));
 
+        let entity_1_meta = world.entity_meta[entity_1.uindex()].unwrap();
         assert!(world.archetypes[0].entities[0] == entity_1);
+        assert!(entity_1_meta.archetype.0 == 0);
+        assert!(entity_1_meta.index == 0);
+
+        let entity_2_meta = world.entity_meta[entity_2.uindex()].unwrap();
         assert!(world.archetypes[0].entities[1] == entity_2);
-        assert!(*world.archetypes[0].sparse.get(entity_1.uindex()).unwrap() == 0);
-        assert!(*world.archetypes[0].sparse.get(entity_2.uindex()).unwrap() == 1);
+        assert!(entity_2_meta.archetype.0 == 0);
+        assert!(entity_2_meta.index == 1);
 
         world.add_component(entity_1, B(2.));
 
-        assert!(world.archetypes[0].entities.len() == 1);
+        let entity_1_meta = world.entity_meta[entity_1.uindex()].unwrap();
+        assert!(world.archetypes[1].entities[0] == entity_1);
+        assert!(world.archetypes[1].entities.len() == 1);
+        assert!(entity_1_meta.archetype.0 == 1);
+        assert!(entity_1_meta.index == 0);
+
+        let entity_2_meta = world.entity_meta[entity_2.uindex()].unwrap();
         assert!(world.archetypes[0].entities[0] == entity_2);
-        dbg!(*world.archetypes[0].sparse.get(entity_2.uindex()).unwrap());
-        assert!(*world.archetypes[0].sparse.get(entity_2.uindex()).unwrap() == 0);
+        assert!(world.archetypes[0].entities.len() == 1);
+        assert!(entity_2_meta.archetype.0 == 0);
+        assert!(entity_2_meta.index == 0);
 
         world.add_component(entity_2, B(2.));
+        assert!(world.archetypes[0].entities.len() == 0);
+        assert!(world.archetypes[1].entities.len() == 2);
+
+        let entity_1_meta = world.entity_meta[entity_1.uindex()].unwrap();
+        assert!(world.archetypes[1].entities[0] == entity_1);
+        assert!(entity_1_meta.archetype.0 == 1);
+        assert!(entity_1_meta.index == 0);
+
+        let entity_2_meta = world.entity_meta[entity_2.uindex()].unwrap();
+        assert!(world.archetypes[1].entities[1] == entity_2);
+        assert!(entity_2_meta.archetype.0 == 1);
+        assert!(entity_2_meta.index == 1);
     }
 
     #[test]

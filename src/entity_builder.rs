@@ -100,18 +100,19 @@ impl<'w, T: TupleEntry> EntityBuilder<'w, T> {
         components.collect_type_ids(&mut type_ids);
 
         if let Some(archetype_idx) = world.find_archetype(&type_ids) {
-            let archetype = &mut world.archetypes[archetype_idx];
+            let archetype = &mut world.archetypes[archetype_idx.0];
             archetype.entities.push(entity);
-            archetype
-                .sparse
-                .insert(entity.index() as usize, archetype.entities.len() - 1);
-
             components.spawn_fn(archetype);
-            world.add_entity_to_sparse_array(entity, archetype_idx);
+
+            let entities_len = archetype.entities.len();
+            world.set_entity_meta(entity, archetype_idx, entities_len - 1);
         } else {
-            let archetype = crate::world::Archetype::new(entity, components);
+            let archetype = Archetype::new(entity, components);
             world.archetypes.push(archetype);
-            world.add_entity_to_sparse_array(entity, world.archetypes.len() - 1);
+
+            // 0 because the archetype was just created
+            use crate::world::ArchIndex;
+            world.set_entity_meta(entity, ArchIndex(world.archetypes.len() - 1), 0);
 
             // We only need to create the locks if the archetype wasnt created
             for id in &type_ids {
