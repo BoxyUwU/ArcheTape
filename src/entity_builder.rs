@@ -71,7 +71,7 @@ pub struct EntityBuilder<'w, T = ()>
 where
     T: TupleEntry,
 {
-    pub(crate) entity: crate::entities::Entity,
+    pub(crate) entity: crate::entities::EcsId,
     pub(crate) world: &'w mut World,
     pub(crate) components_len: usize,
     pub(crate) components: T,
@@ -88,7 +88,7 @@ impl<'w, T: TupleEntry> EntityBuilder<'w, T> {
         }
     }
 
-    pub fn build(self) -> crate::entities::Entity {
+    pub fn build(self) -> crate::entities::EcsId {
         let Self {
             world,
             entity,
@@ -105,14 +105,27 @@ impl<'w, T: TupleEntry> EntityBuilder<'w, T> {
             components.spawn_fn(archetype);
 
             let entities_len = archetype.entities.len();
-            world.set_entity_meta(entity, archetype_idx, entities_len - 1);
+            let entity_meta = crate::world::EntityMeta {
+                instance_meta: crate::world::InstanceMeta {
+                    archetype: archetype_idx,
+                    index: entities_len - 1,
+                },
+                component_meta: crate::world::ComponentMeta::unit(),
+            };
+            world.set_entity_meta(entity, entity_meta);
         } else {
             let archetype = Archetype::new(entity, components);
             world.archetypes.push(archetype);
 
-            // 0 because the archetype was just created
             use crate::world::ArchIndex;
-            world.set_entity_meta(entity, ArchIndex(world.archetypes.len() - 1), 0);
+            let entity_meta = crate::world::EntityMeta {
+                instance_meta: crate::world::InstanceMeta {
+                    archetype: ArchIndex(world.archetypes.len() - 1),
+                    index: 0,
+                },
+                component_meta: crate::world::ComponentMeta::unit(),
+            };
+            world.set_entity_meta(entity, entity_meta);
 
             // We only need to create the locks if the archetype wasnt created
             for id in &type_ids {

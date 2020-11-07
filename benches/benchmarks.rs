@@ -369,7 +369,7 @@ pub mod simple_large_iter {
 }
 
 pub mod add_remove {
-    use arche_tape::entities::Entity;
+    use arche_tape::entities::EcsId;
     use arche_tape::spawn;
     use arche_tape::world::World;
 
@@ -378,7 +378,7 @@ pub mod add_remove {
     #[derive(Copy, Clone)]
     struct B(f32);
 
-    pub struct Benchmark(World, Box<[Entity]>);
+    pub struct Benchmark(World, Box<[EcsId]>);
 
     impl Benchmark {
         pub fn new() -> Self {
@@ -404,7 +404,7 @@ pub mod add_remove {
 }
 
 pub mod padded_add_remove {
-    use arche_tape::entities::Entity;
+    use arche_tape::entities::EcsId;
     use arche_tape::spawn;
     use arche_tape::world::World;
 
@@ -412,7 +412,7 @@ pub mod padded_add_remove {
     struct A(f32);
     struct B(f32);
 
-    pub struct Benchmark(World, Box<[Entity]>);
+    pub struct Benchmark(World, Box<[EcsId]>);
 
     impl Benchmark {
         pub fn new() -> Self {
@@ -438,7 +438,7 @@ pub mod padded_add_remove {
 }
 
 pub mod wide_add_remove {
-    use arche_tape::entities::Entity;
+    use arche_tape::entities::EcsId;
     use arche_tape::spawn;
     use arche_tape::world::World;
 
@@ -452,7 +452,7 @@ pub mod wide_add_remove {
     struct P8([u8; 128]);
     struct B(f32);
 
-    pub struct Benchmark(World, Box<[Entity]>);
+    pub struct Benchmark(World, Box<[EcsId]>);
 
     impl Benchmark {
         pub fn new() -> Self {
@@ -488,13 +488,13 @@ pub mod wide_add_remove {
 }
 
 pub mod get {
-    use arche_tape::entities::Entity;
+    use arche_tape::entities::EcsId;
     use arche_tape::spawn;
     use arche_tape::world::World;
 
     pub struct A(f32);
 
-    pub struct Benchmark(World, Box<[Entity]>);
+    pub struct Benchmark(World, Box<[EcsId]>);
 
     impl Benchmark {
         pub fn new() -> Self {
@@ -519,7 +519,7 @@ pub mod get {
 }
 
 pub mod padded_get {
-    use arche_tape::entities::Entity;
+    use arche_tape::entities::EcsId;
     use arche_tape::spawn;
     use arche_tape::world::World;
 
@@ -538,7 +538,7 @@ pub mod padded_get {
         };
     }
 
-    pub struct Benchmark(World, Box<[Entity]>);
+    pub struct Benchmark(World, Box<[EcsId]>);
 
     impl Benchmark {
         pub fn new() -> Self {

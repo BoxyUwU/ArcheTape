@@ -1,4 +1,4 @@
-use super::entities::{Entities, Entity};
+use super::entities::{EcsId, Entities};
 use super::untyped_vec::UntypedVec;
 use super::world::{Archetype, World};
 use std::any::TypeId;
@@ -374,10 +374,10 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
 }
 
 unsafe impl<'b, 'guard: 'b> Borrow<'b, 'guard> for Entities {
-    type Of = Entity;
-    type Returns = Entity;
-    type Iter = std::iter::Copied<Iter<'b, Entity>>;
-    type StorageBorrow = &'guard Vec<Entity>;
+    type Of = EcsId;
+    type Returns = EcsId;
+    type Iter = std::iter::Copied<Iter<'b, EcsId>>;
+    type StorageBorrow = &'guard Vec<EcsId>;
     type Lock = ();
 
     fn iter_from_guard(guard: &'b mut Self::StorageBorrow) -> (usize, Self::Iter) {
@@ -518,7 +518,7 @@ mod tests {
 
         let query = world.query::<(Entities, &u32, &u64)>();
 
-        let mut checks = vec![(Entity::new(0, 0), 1, 12)].into_iter();
+        let mut checks = vec![(EcsId::new(0, 0), 1, 12)].into_iter();
         query.borrow().for_each_mut(|(entity, left, right)| {
             assert!(checks.next().unwrap() == (entity, *left, *right));
         });

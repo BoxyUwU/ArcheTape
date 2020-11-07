@@ -1,30 +1,30 @@
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct Entity(u64);
+#[allow(non_camel_case_types)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct EcsId(u64);
 
-impl Entity {
+impl EcsId {
     const GENERATION_MASK: u64 = !Self::INDEX_MASK;
-    const INDEX_MASK: u64 = u64::MAX >> 16;
+    const INDEX_MASK: u64 = u64::MAX >> 32;
 
-    pub fn generation(&self) -> u16 {
-        ((self.0 & Self::GENERATION_MASK) >> 48) as u16
+    pub fn generation(&self) -> u32 {
+        ((self.0 & Self::GENERATION_MASK) >> 32) as u32
     }
 
-    pub fn index(&self) -> u64 {
-        self.0 & Self::INDEX_MASK
+    pub fn index(&self) -> u32 {
+        (self.0 & Self::INDEX_MASK) as u32
     }
 
     pub fn uindex(&self) -> usize {
         (self.0 & Self::INDEX_MASK) as usize
     }
 
-    pub(crate) fn new(index: u64, generation: u16) -> Entity {
-        debug_assert!(index & Self::GENERATION_MASK == 0);
-        Entity(index | ((generation as u64) << 48))
+    pub(crate) fn new(index: u32, generation: u32) -> EcsId {
+        EcsId(index as u64 | ((generation as u64) << 32))
     }
 }
 
 pub struct Entities {
-    pub(crate) generations: Vec<u16>,
+    pub(crate) generations: Vec<u32>,
     pub(crate) despawned: Vec<usize>,
 }
 
@@ -36,7 +36,7 @@ impl Entities {
         }
     }
 
-    pub fn spawn(&mut self) -> Entity {
+    pub fn spawn(&mut self) -> EcsId {
         let idx = match self.despawned.pop() {
             Some(idx) => idx,
             None => {
@@ -45,27 +45,24 @@ impl Entities {
             }
         };
 
+        assert!(idx <= u32::MAX as usize);
         let generation = *self.generations.get_mut(idx).unwrap();
-        Entity::new(idx as u64, generation)
+        EcsId::new(idx as u32, generation)
     }
 
     /// Returns true if entity was despawned
-    pub fn despawn(&mut self, to_despawn: Entity) -> bool {
-        let generation = to_despawn.generation();
-        let index = to_despawn.uindex();
-
-        let entity = self.generations.get_mut(index).unwrap();
-
-        if *entity != generation {
-            return false;
-        };
-
-        *entity = (*entity).wrapping_add(1);
-        self.despawned.push(index);
-        true
+    pub fn despawn(&mut self, to_despawn: EcsId) -> bool {
+        if self.is_alive(to_despawn) {
+            let generation = &mut self.generations[to_despawn.uindex()];
+            *generation = generation.wrapping_add(1);
+            self.despawned.push(to_despawn.index() as usize);
+            true
+        } else {
+            false
+        }
     }
 
-    pub fn is_alive(&self, entity: Entity) -> bool {
+    pub fn is_alive(&self, entity: EcsId) -> bool {
         *self.generations.get(entity.uindex()).unwrap() == entity.generation()
     }
 }
@@ -78,7 +75,7 @@ mod tests {
     pub fn spawn_one() {
         let mut entities = Entities::new();
 
-        assert_eq!(Entity(0), entities.spawn());
+        assert_eq!(EcsId(0), entities.spawn());
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 1);
     }
@@ -87,19 +84,19 @@ mod tests {
     pub fn spawn_multiple() {
         let mut entities = Entities::new();
 
-        assert_eq!(Entity(0), entities.spawn());
+        assert_eq!(EcsId(0), entities.spawn());
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 1);
 
-        assert_eq!(Entity(1), entities.spawn());
+        assert_eq!(EcsId(1), entities.spawn());
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 2);
 
-        assert_eq!(Entity(2), entities.spawn());
+        assert_eq!(EcsId(2), entities.spawn());
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 3);
 
-        assert_eq!(Entity(3), entities.spawn());
+        assert_eq!(EcsId(3), entities.spawn());
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 4);
     }
@@ -109,7 +106,7 @@ mod tests {
         let mut entities = Entities::new();
 
         let entity = entities.spawn();
-        assert_eq!(Entity(0), entity);
+        assert_eq!(EcsId(0), entity);
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 1);
 
@@ -125,7 +122,7 @@ mod tests {
         let mut entities = Entities::new();
 
         let entity = entities.spawn();
-        assert_eq!(Entity(0), entity);
+        assert_eq!(EcsId(0), entity);
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 1);
 
@@ -136,7 +133,7 @@ mod tests {
         assert!(entities.is_alive(entity) == false);
 
         let entity2 = entities.spawn();
-        assert_eq!(Entity::new(0, 1), entity2);
+        assert_eq!(EcsId::new(0, 1), entity2);
         assert!(entity != entity2);
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 1);
@@ -164,12 +161,12 @@ mod tests {
         let mut entities = Entities::new();
 
         let entity = entities.spawn();
-        assert_eq!(Entity(0), entity);
+        assert_eq!(EcsId(0), entity);
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 1);
 
         let entity2 = entities.spawn();
-        assert_eq!(Entity::new(1, 0), entity2);
+        assert_eq!(EcsId::new(1, 0), entity2);
         assert!(entity != entity2);
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 2);
@@ -203,7 +200,7 @@ mod tests {
     pub fn generation_wraps() {
         let mut entities = Entities::new();
 
-        entities.generations.push(u16::MAX);
+        entities.generations.push(u32::MAX);
         entities.despawned.push(0);
 
         let entity = entities.spawn();
@@ -212,7 +209,7 @@ mod tests {
         let entity = entities.spawn();
 
         assert!(entities.is_alive(entity));
-        assert!(entity == Entity(0));
+        assert!(entity == EcsId(0));
         assert!(entities.generations.len() == 1);
         assert!(*entities.generations.get(0).unwrap() == 0);
         assert!(entities.despawned.len() == 0);
