@@ -1,5 +1,5 @@
 #[allow(non_camel_case_types)]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct EcsId(u64);
 
 impl EcsId {

@@ -1,5 +1,7 @@
+use crate::entities::EcsId;
 use crate::world::{Archetype, World};
 use std::any::TypeId;
+use std::collections::HashMap;
 
 pub trait TupleEntry: 'static {
     type Left: 'static;
@@ -7,9 +9,13 @@ pub trait TupleEntry: 'static {
 
     fn next(self) -> Option<(Self::Left, Self::Right)>;
 
-    fn spawn_fn(self, archetype: &mut Archetype);
+    fn spawn_fn(
+        self,
+        archetype: &mut Archetype,
+        ecs_id_to_type_id: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>,
+    );
 
-    fn collect_type_ids(&self, ids: &mut Vec<TypeId>);
+    fn collect_comp_ids(&self, ids: &mut Vec<EcsId>, world: &mut World);
 }
 
 impl<T: 'static, U: TupleEntry + 'static> TupleEntry for (T, U) {
@@ -21,19 +27,32 @@ impl<T: 'static, U: TupleEntry + 'static> TupleEntry for (T, U) {
     }
 
     #[inline(always)]
-    fn spawn_fn(self, archetype: &mut Archetype) {
+    fn spawn_fn(
+        self,
+        archetype: &mut Archetype,
+        type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>,
+    ) {
         let (left, right) = self;
 
-        let storage_idx = archetype.lookup[&TypeId::of::<Self::Left>()];
+        let comp_id = &type_id_to_ecs_id[&TypeId::of::<Self::Left>()];
+        let storage_idx = archetype.lookup[comp_id];
         let storage = archetype.component_storages[storage_idx].get_mut();
-        storage.push(left);
 
-        Self::Right::spawn_fn(right, archetype);
+        {
+            use core::mem::ManuallyDrop;
+            use core::mem::MaybeUninit;
+            let mut left = ManuallyDrop::new(left);
+            // Safe as long as type_id_to_ecs_id and archetype.lookup are correct
+            unsafe { storage.push_raw({ &mut left } as *mut _ as *mut MaybeUninit<u8>) }
+        }
+
+        Self::Right::spawn_fn(right, archetype, type_id_to_ecs_id);
     }
 
-    fn collect_type_ids(&self, ids: &mut Vec<TypeId>) {
-        ids.push(TypeId::of::<Self::Left>());
-        Self::Right::collect_type_ids(&self.1, ids);
+    fn collect_comp_ids(&self, ids: &mut Vec<EcsId>, world: &mut World) {
+        let comp_id = world.get_or_create_type_id_ecsid::<Self::Left>();
+        ids.push(comp_id);
+        Self::Right::collect_comp_ids(&self.1, ids, world);
     }
 }
 
@@ -45,7 +64,11 @@ impl TupleEntry for () {
         None
     }
 
-    fn spawn_fn(self, archetype: &mut Archetype) {
+    fn spawn_fn(
+        self,
+        archetype: &mut Archetype,
+        _: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>,
+    ) {
         // This makes sure the same component was not added twice
         // TODO overwrite old component instead?
         let entities_len = archetype.entities.len();
@@ -64,7 +87,7 @@ impl TupleEntry for () {
         }
     }
 
-    fn collect_type_ids(&self, _: &mut Vec<TypeId>) {}
+    fn collect_comp_ids(&self, _: &mut Vec<EcsId>, _: &mut World) {}
 }
 
 pub struct EntityBuilder<'w, T = ()>
@@ -96,13 +119,13 @@ impl<'w, T: TupleEntry> EntityBuilder<'w, T> {
             components,
         } = self;
 
-        let mut type_ids = Vec::with_capacity(components_len);
-        components.collect_type_ids(&mut type_ids);
+        let mut comp_ids = Vec::with_capacity(components_len);
+        components.collect_comp_ids(&mut comp_ids, world);
 
-        if let Some(archetype_idx) = world.find_archetype(&type_ids) {
+        if let Some(archetype_idx) = world.find_archetype_dynamic(&comp_ids) {
             let archetype = &mut world.archetypes[archetype_idx.0];
             archetype.entities.push(entity);
-            components.spawn_fn(archetype);
+            components.spawn_fn(archetype, &world.type_id_to_ecs_id);
 
             let entities_len = archetype.entities.len();
             let entity_meta = crate::world::EntityMeta {
@@ -114,7 +137,15 @@ impl<'w, T: TupleEntry> EntityBuilder<'w, T> {
             };
             world.set_entity_meta(entity, entity_meta);
         } else {
-            let archetype = Archetype::new(entity, components);
+            // We only need to create the locks if the archetype wasnt created
+            for id in &comp_ids {
+                if !world.lock_lookup.contains_key(id) {
+                    world.lock_lookup.insert(id.clone(), world.locks.len());
+                    world.locks.push(std::sync::RwLock::new(()));
+                }
+            }
+
+            let archetype = Archetype::new(entity, components, comp_ids);
             world.archetypes.push(archetype);
 
             use crate::world::ArchIndex;
@@ -126,14 +157,6 @@ impl<'w, T: TupleEntry> EntityBuilder<'w, T> {
                 component_meta: crate::world::ComponentMeta::unit(),
             };
             world.set_entity_meta(entity, entity_meta);
-
-            // We only need to create the locks if the archetype wasnt created
-            for id in &type_ids {
-                if !world.lock_lookup.contains_key(id) {
-                    world.lock_lookup.insert(*id, world.locks.len());
-                    world.locks.push(std::sync::RwLock::new(()));
-                }
-            }
         }
 
         entity

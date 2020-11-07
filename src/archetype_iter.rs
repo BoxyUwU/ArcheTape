@@ -37,14 +37,34 @@ pub struct QueryBorrow<
 }
 
 pub trait QueryInfos: 'static {
+    fn comp_ids(
+        type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>,
+    ) -> Vec<Option<EcsId>>;
+
     fn type_ids() -> Vec<Option<TypeId>>;
 }
 
 macro_rules! impl_query_infos {
     ($($x:ident)*) => {
         impl<'b, 'guard: 'b, $($x: Borrow<'b, 'guard>,)*> QueryInfos for ($($x,)*) {
+            fn comp_ids(type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>) -> Vec<Option<EcsId>> {
+                vec![$(
+                    {
+                        if let Some(id) = $x::type_id() {
+                            Some(type_id_to_ecs_id[&id])
+                        } else {
+                            None
+                        }
+                    },
+                )*]
+            }
+
             fn type_ids() -> Vec<Option<TypeId>> {
-                vec![$($x::type_id(),)*]
+                vec![
+                    $(
+                        $x::type_id(),
+                    )*
+                ]
             }
         }
 
@@ -53,10 +73,11 @@ macro_rules! impl_query_infos {
                 let archetypes = self.world.query_archetypes::<($($x,)*)>();
                 let mut borrows: Vec<($($x::StorageBorrow,)*)> = Vec::with_capacity(16);
 
-                let locks = Self::acquire_locks(&self.world.lock_lookup, &self.world.locks);
+                let ecs_ids = [$($x::get_ecs_id(&self.world.type_id_to_ecs_id),)*];
 
+                let locks = Self::acquire_locks(&self.world.lock_lookup, &self.world.locks, &ecs_ids);
                 for archetype in archetypes.map(|idx| self.world.archetypes.get(idx).unwrap()) {
-                    <Query<($($x,)*)>>::borrow_storages(&mut borrows, archetype);
+                    <Query<($($x,)*)>>::borrow_storages(&mut borrows, archetype, &ecs_ids);
                 }
 
                 QueryBorrow {
@@ -67,17 +88,21 @@ macro_rules! impl_query_infos {
                 }
             }
 
-            pub fn acquire_locks(lock_lookup: &HashMap<TypeId, usize>, locks: &'guard [RwLock<()>]) -> ($($x::Lock,)*) {
-                ($(
-                    $x::acquire_lock(&lock_lookup, &locks),
-                )*)
+            pub fn acquire_locks(lock_lookup: &HashMap<EcsId, usize, crate::TypeIdHasherBuilder>, locks: &'guard [RwLock<()>], ecs_ids: &[Option<EcsId>]) -> ($($x::Lock,)*) {
+                let mut n = 0;
+                ($({
+                    n += 1;
+                    $x::acquire_lock(ecs_ids[n - 1], &lock_lookup, &locks)
+                },)*)
             }
 
-            pub fn borrow_storages(all_guards: &mut Vec<($($x::StorageBorrow,)*)>, archetype: &'guard Archetype) {
+            pub fn borrow_storages(all_guards: &mut Vec<($($x::StorageBorrow,)*)>, archetype: &'guard Archetype, ecs_ids: &[Option<EcsId>]) {
+                let mut n = 0;
                 all_guards.push(
-                    ($(
-                        <$x as Borrow<'a, 'guard>>::borrow_storage(archetype),
-                    )*)
+                    ($({
+                        n += 1;
+                        <$x as Borrow<'a, 'guard>>::borrow_storage(archetype, ecs_ids[n - 1])
+                    },)*)
                 );
             }
         }
@@ -231,7 +256,9 @@ pub trait Iters<'a, 'guard: 'a, T: QueryInfos + 'static> {
 
 pub trait StorageBorrows<'guard, T: QueryInfos + 'static> {}
 
-// SAFETY: The length returned from iter_from_guards **must** be accurate as we rely on being able to call get_unchecked() if one iterator returns Some(_)
+/// SAFETY: The length returned from iter_from_guards **must** be accurate as we rely on being able to call get_unchecked() if one iterator returns Some(_)
+///
+/// SAFETY: type_id function should return the same type_id used in the lookup inside get_ecs_id
 pub unsafe trait Borrow<'b, 'guard: 'b>: Sized + 'static {
     type Of: 'static;
     type Returns: 'b;
@@ -239,22 +266,28 @@ pub unsafe trait Borrow<'b, 'guard: 'b>: Sized + 'static {
     type StorageBorrow: 'guard;
     type Lock: 'guard;
 
+    /// Used to find matching archetypes for the query
+    fn get_ecs_id(
+        type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>,
+    ) -> Option<EcsId>;
+
     fn iter_from_guard(guard: &'b mut Self::StorageBorrow) -> (usize, Self::Iter);
 
     fn borrow_from_iter(iter: &mut Self::Iter) -> Option<Self::Returns>;
 
     unsafe fn borrow_from_iter_unchecked(iter: &mut Self::Iter) -> Self::Returns;
 
-    fn borrow_storage(archetype: &'guard Archetype) -> Self::StorageBorrow;
+    fn borrow_storage(archetype: &'guard Archetype, comp_id: Option<EcsId>) -> Self::StorageBorrow;
 
     fn acquire_lock(
-        lock_lookup: &HashMap<TypeId, usize>,
+        comp_id: Option<EcsId>,
+        lock_lookup: &HashMap<EcsId, usize, crate::TypeIdHasherBuilder>,
         locks: &'guard [RwLock<()>],
     ) -> Self::Lock;
 
     fn iter_empty<'a>() -> Self::Iter;
 
-    /// Returning None allows for this Borrow to be skipped when checking if an archetype contains Self::Of
+    /// Used to create EcsId's needed for this query.
     fn type_id() -> Option<TypeId>;
 }
 
@@ -266,7 +299,8 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
     type Lock = RwLockReadGuard<'guard, ()>;
 
     fn iter_from_guard(borrow: &'b mut Self::StorageBorrow) -> (usize, Self::Iter) {
-        let slice = borrow.as_slice::<T>();
+        // Safe because we lookup the UntypedVec via a EcsId gotten from the TypeId->EcsId hashmap
+        let slice = unsafe { borrow.as_slice::<T>() };
         (slice.len(), slice.iter())
     }
 
@@ -284,15 +318,19 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
         }
     }
 
-    fn borrow_storage(archetype: &'guard Archetype) -> Self::StorageBorrow {
-        let type_id = TypeId::of::<T>();
+    fn get_ecs_id(
+        type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>,
+    ) -> Option<EcsId> {
+        Some(type_id_to_ecs_id[&TypeId::of::<T>()])
+    }
 
+    fn borrow_storage(archetype: &'guard Archetype, comp_id: Option<EcsId>) -> Self::StorageBorrow {
         // TODO this has really bad performance when there's lots of components in an archetype
         // We really should use the .lookup[type_id] for those cases but that really badly affects
         // perf in cases where there *arent* many components in the archetype... EVENTUALLY we should
         // just cache the indices we need for a query rendering this all moot
-        for (n, id) in archetype.type_ids.iter().enumerate() {
-            if id == &type_id {
+        for (n, id) in archetype.comp_ids.iter().enumerate() {
+            if id == &comp_id.unwrap() {
                 return unsafe { &*archetype.component_storages[n].get() };
             }
         }
@@ -300,10 +338,11 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
     }
 
     fn acquire_lock(
-        lock_lookup: &HashMap<TypeId, usize>,
+        comp_id: Option<EcsId>,
+        lock_lookup: &HashMap<EcsId, usize, crate::TypeIdHasherBuilder>,
         locks: &'guard [RwLock<()>],
     ) -> Self::Lock {
-        let lock_idx = lock_lookup[&TypeId::of::<T>()];
+        let lock_idx = lock_lookup[&comp_id.unwrap()];
         locks.get(lock_idx).unwrap().read().unwrap()
     }
 
@@ -322,8 +361,9 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
     type StorageBorrow = &'guard mut UntypedVec;
     type Lock = RwLockWriteGuard<'guard, ()>;
 
-    fn iter_from_guard(guard: &'b mut Self::StorageBorrow) -> (usize, Self::Iter) {
-        let slice = guard.as_slice_mut::<T>();
+    fn iter_from_guard(borrow: &'b mut Self::StorageBorrow) -> (usize, Self::Iter) {
+        // Safe because we lookup the UntypedVec via a EcsId gotten from the TypeId->EcsId hashmap
+        let slice = unsafe { borrow.as_slice_mut::<T>() };
         (slice.len(), slice.iter_mut())
     }
 
@@ -341,15 +381,19 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
         }
     }
 
-    fn borrow_storage(archetype: &'guard Archetype) -> Self::StorageBorrow {
-        let type_id = TypeId::of::<T>();
+    fn get_ecs_id(
+        type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>,
+    ) -> Option<EcsId> {
+        Some(type_id_to_ecs_id[&TypeId::of::<T>()])
+    }
 
+    fn borrow_storage(archetype: &'guard Archetype, comp_id: Option<EcsId>) -> Self::StorageBorrow {
         // TODO this has really bad performance when there's lots of components in an archetype
         // We really should use the .lookup[type_id] for those cases but that really badly affects
         // perf in cases where there *arent* many components in the archetype... EVENTUALLY we should
         // just cache the indices we need for a query rendering this all moot
-        for (n, id) in archetype.type_ids.iter().enumerate() {
-            if id == &type_id {
+        for (n, id) in archetype.comp_ids.iter().enumerate() {
+            if id == &comp_id.unwrap() {
                 return unsafe { &mut *archetype.component_storages[n].get() };
             }
         }
@@ -357,10 +401,11 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
     }
 
     fn acquire_lock(
-        lock_lookup: &HashMap<TypeId, usize>,
+        comp_id: Option<EcsId>,
+        lock_lookup: &HashMap<EcsId, usize, crate::TypeIdHasherBuilder>,
         locks: &'guard [RwLock<()>],
     ) -> Self::Lock {
-        let lock_idx = lock_lookup[&TypeId::of::<T>()];
+        let lock_idx = lock_lookup[&comp_id.unwrap()];
         locks.get(lock_idx).unwrap().write().unwrap()
     }
 
@@ -398,11 +443,20 @@ unsafe impl<'b, 'guard: 'b> Borrow<'b, 'guard> for Entities {
         }
     }
 
-    fn borrow_storage(archetype: &'guard Archetype) -> Self::StorageBorrow {
+    fn get_ecs_id(_: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>) -> Option<EcsId> {
+        None
+    }
+
+    fn borrow_storage(archetype: &'guard Archetype, comp_id: Option<EcsId>) -> Self::StorageBorrow {
+        assert!(comp_id.is_none());
         &archetype.entities
     }
 
-    fn acquire_lock(_: &HashMap<TypeId, usize>, _: &'guard [RwLock<()>]) -> Self::Lock {
+    fn acquire_lock(
+        _: Option<EcsId>,
+        _: &HashMap<EcsId, usize, crate::TypeIdHasherBuilder>,
+        _: &'guard [RwLock<()>],
+    ) -> Self::Lock {
         ()
     }
 
