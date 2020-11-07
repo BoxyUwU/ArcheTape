@@ -814,6 +814,9 @@ impl World {
         if !self.entities.is_alive(entity) {
             return None;
         }
+        if !self.entities.is_alive(comp_id) {
+            return None;
+        }
 
         let (archetype_idx, entity_idx) = {
             let meta = self.get_entity_meta(entity)?;

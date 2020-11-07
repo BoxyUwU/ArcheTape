@@ -542,6 +542,10 @@ mod tests {
         }
 
         let mut untyped_vec_2 = untyped_vec_new::<Wrap>();
+        #[cfg(miri)]
+        {
+            untyped_vec_2.type_info.drop_fn = untyped_vec_1.type_info.drop_fn;
+        }
 
         untyped_vec_1.swap_move_element_to_other_vec(&mut untyped_vec_2, 0);
 
@@ -577,6 +581,11 @@ mod tests {
         }
 
         let mut untyped_vec_2 = untyped_vec_new::<Wrap>();
+
+        #[cfg(miri)]
+        {
+            untyped_vec_2.type_info.drop_fn = untyped_vec_1.type_info.drop_fn;
+        }
 
         untyped_vec_1.swap_move_element_to_other_vec(&mut untyped_vec_2, 1);
 
