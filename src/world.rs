@@ -344,17 +344,6 @@ pub struct World {
 }
 
 impl World {
-    pub fn generic_to_ecs_id<T: 'static>(&self) -> Option<EcsId> {
-        let comp_id = *self.type_id_to_ecs_id.get(&TypeId::of::<T>())?;
-        let meta = self.get_entity_meta(comp_id).unwrap();
-        // Sanity check correctness of the type_id_to_ecs_id
-        assert!(meta.component_meta.layout == core::alloc::Layout::new::<T>());
-        assert!(meta.component_meta.type_id == Some(TypeId::of::<T>()));
-        assert!(self.entities.is_alive(comp_id));
-        Some(comp_id)
-    }
-
-    /// Returns Err if it was already created
     pub fn get_or_create_type_id_ecsid<T: 'static>(&mut self) -> EcsId {
         let comp_id = self.type_id_to_ecs_id.get(&TypeId::of::<T>());
         if let Some(comp_id) = comp_id {
@@ -362,6 +351,8 @@ impl World {
         }
 
         let entity = self.spawn().build();
+
+        // Guaranteed valid because we just spawned the entity
         let meta = self.ecs_id_meta[entity.uindex()].as_mut().unwrap();
         meta.component_meta = ComponentMeta::from_generic::<T>();
 
@@ -372,7 +363,7 @@ impl World {
 
     pub fn add_component<T: 'static>(&mut self, entity: EcsId, component: T) {
         assert!(self.entities.is_alive(entity));
-        let comp_id = self.generic_to_ecs_id::<T>().unwrap();
+        let comp_id = self.get_or_create_type_id_ecsid::<T>();
         let mut component = core::mem::ManuallyDrop::new(component);
         unsafe {
             self.add_component_dynamic(entity, comp_id, &mut component as *mut _ as *mut u8);
@@ -381,13 +372,13 @@ impl World {
 
     pub fn remove_component<T: 'static>(&mut self, entity: EcsId) {
         assert!(self.entities.is_alive(entity));
-        let comp_id = self.generic_to_ecs_id::<T>().unwrap();
+        let comp_id = self.get_or_create_type_id_ecsid::<T>();
         self.remove_component_dynamic(entity, comp_id);
     }
 
     pub fn get_component_mut<'a, T: 'static>(&'a mut self, entity: EcsId) -> Option<&'a mut T> {
         assert!(self.entities.is_alive(entity));
-        let comp_id = self.generic_to_ecs_id::<T>().unwrap();
+        let comp_id = self.get_or_create_type_id_ecsid::<T>();
         self.get_component_mut_dynamic(entity, comp_id)
             .map(|ptr| unsafe { &mut *{ ptr.cast::<T>() } })
     }
@@ -463,22 +454,11 @@ impl World {
         position.map(ArchIndex)
     }
 
-    pub fn find_archetype_plus_id(
-        &self,
-        comp_ids: &[EcsId],
-        extra_id: Option<EcsId>,
-    ) -> Option<usize> {
-        let is_extra = if extra_id.is_some() { 1 } else { 0 };
+    pub fn find_archetype_plus_id(&self, comp_ids: &[EcsId], extra_id: EcsId) -> Option<usize> {
         let position = self.archetypes.iter().position(|archetype| {
-            archetype.comp_ids.len() == comp_ids.len() + is_extra
+            archetype.comp_ids.len() == comp_ids.len() + 1
                 && comp_ids.iter().all(|id| archetype.comp_ids.contains(id))
-                && {
-                    if let Some(extra_id) = extra_id {
-                        archetype.comp_ids.contains(&extra_id)
-                    } else {
-                        true
-                    }
-                }
+                && archetype.comp_ids.contains(&extra_id)
         });
 
         position
@@ -527,11 +507,15 @@ impl World {
     }
 
     pub fn despawn(&mut self, entity: EcsId) -> bool {
-        // We need to check entity is added as a component and if it is remove it
-        todo!();
-
         if !self.entities.is_alive(entity) {
             return false;
+        }
+
+        // TODO: Remove `entity` component from all entities
+        for arch in &self.archetypes {
+            if let Some(_) = arch.lookup.get(&entity) {
+                todo!();
+            }
         }
 
         let InstanceMeta { archetype, index } =
@@ -707,7 +691,7 @@ impl World {
                 // target archetype will have so we could store a hashmap of that -> archetype_idx in world to avoid this O(n) lookup
 
                 let current_archetype = &self.archetypes[current_archetype_idx.0];
-                let idx = self.find_archetype_minus_id(&current_archetype.comp_ids, comp_id);
+                let idx = self.find_archetype_plus_id(&current_archetype.comp_ids, comp_id);
 
                 if let Some(idx) = idx {
                     let current_archetype = &mut self.archetypes[current_archetype_idx.0];
@@ -725,7 +709,7 @@ impl World {
                 }
 
                 let (layout, drop_fn) = {
-                    let meta = self.get_entity_meta(entity).unwrap();
+                    let meta = self.get_entity_meta(comp_id).unwrap();
                     (
                         meta.component_meta.layout.clone(),
                         meta.component_meta.drop_fn.clone(),
@@ -875,7 +859,7 @@ mod tests {
 
         let entity_meta = world.ecs_id_meta[entity.uindex()].clone().unwrap();
         assert!(entity_meta.instance_meta.index == 0);
-        assert!(entity_meta.instance_meta.archetype.0 == 0);
+        assert!(entity_meta.instance_meta.archetype.0 == 1);
     }
 
     #[test]
@@ -884,19 +868,31 @@ mod tests {
         let entity = spawn!(&mut world, 1_u32);
         world.add_component(entity, 2_u64);
 
-        assert!(world.archetypes.len() == 2);
+        assert!(world.archetypes.len() == 3);
         let entity_meta = world.ecs_id_meta[entity.uindex()].clone().unwrap();
-        assert!(entity_meta.instance_meta.archetype.0 == 1);
+        assert!(entity_meta.instance_meta.archetype.0 == 2);
         assert!(entity_meta.instance_meta.index == 0);
 
-        assert!(world.archetypes[0].entities.len() == 0);
+        // The two component entities
+        assert!(world.archetypes[0].entities.len() == 2);
+        assert!(world.archetypes[0].component_storages.len() == 0);
         for lock in world.archetypes[0].component_storages.iter_mut() {
             let storage = lock.get_mut();
             assert!(storage.len() == 0);
         }
 
-        assert!(world.archetypes[1].entities.len() == 1);
+        // The first archetype entity was in
+        assert!(world.archetypes[1].entities.len() == 0);
+        assert!(world.archetypes[1].component_storages.len() == 1);
         for lock in world.archetypes[1].component_storages.iter_mut() {
+            let storage = lock.get_mut();
+            assert!(storage.len() == 0);
+        }
+
+        // The current archetype entity was in
+        assert!(world.archetypes[2].entities.len() == 1);
+        assert!(world.archetypes[2].component_storages.len() == 2);
+        for lock in world.archetypes[2].component_storages.iter_mut() {
             let storage = lock.get_mut();
             assert!(storage.len() == 1);
         }
@@ -919,29 +915,32 @@ mod tests {
 
         let entity2 = spawn!(&mut world, 3_u32, 4_u64);
 
-        assert!(world.archetypes.len() == 2);
-        assert!(world.archetypes[1].entities[0] == entity);
-        assert!(world.archetypes[1].entities[1] == entity2);
+        assert!(world.archetypes.len() == 3);
+
+        // Component entities
+        assert!(world.archetypes[0].entities.len() == 2);
+        assert!(world.archetypes[0].component_storages.len() == 0);
+
+        // Original first entity archetype
+        assert!(world.archetypes[1].entities.len() == 0);
+        assert!(world.archetypes[1].component_storages.len() == 1);
+        assert!(world.archetypes[1].component_storages[0].get_mut().len() == 0);
+
+        // Entity2 + Entity1 Archetpye
+        assert!(world.archetypes[2].entities.len() == 2);
+        assert!(world.archetypes[2].entities[0] == entity);
+        assert!(world.archetypes[2].entities[1] == entity2);
+        assert!(world.archetypes[2].component_storages.len() == 2);
+        assert!(world.archetypes[2].component_storages[0].get_mut().len() == 2);
+        assert!(world.archetypes[2].component_storages[1].get_mut().len() == 2);
 
         let entity_meta = world.ecs_id_meta[entity.uindex()].clone().unwrap();
-        assert!(entity_meta.instance_meta.archetype.0 == 1);
+        assert!(entity_meta.instance_meta.archetype.0 == 2);
         assert!(entity_meta.instance_meta.index == 0);
 
         let entity_meta = world.ecs_id_meta[entity2.uindex()].clone().unwrap();
-        assert!(entity_meta.instance_meta.archetype.0 == 1);
+        assert!(entity_meta.instance_meta.archetype.0 == 2);
         assert!(entity_meta.instance_meta.index == 1);
-
-        assert!(world.archetypes[0].entities.len() == 0);
-        for lock in world.archetypes[0].component_storages.iter_mut() {
-            let storage = lock.get_mut();
-            assert!(storage.len() == 0);
-        }
-
-        assert!(world.archetypes[1].entities.len() == 2);
-        for lock in world.archetypes[1].component_storages.iter_mut() {
-            let storage = lock.get_mut();
-            assert!(storage.len() == 2);
-        }
 
         let mut run_times = 0;
         let mut checks = vec![(1, 2), (3, 4)].into_iter();
@@ -962,33 +961,8 @@ mod tests {
         let entity_1 = spawn!(&mut world, A(1.));
         let entity_2 = spawn!(&mut world, A(1.));
 
-        let entity_1_meta = world.ecs_id_meta[entity_1.uindex()].clone().unwrap();
-        assert!(world.archetypes[0].entities[0] == entity_1);
-        assert!(entity_1_meta.instance_meta.archetype.0 == 0);
-        assert!(entity_1_meta.instance_meta.index == 0);
-
-        let entity_2_meta = world.ecs_id_meta[entity_2.uindex()].clone().unwrap();
-        assert!(world.archetypes[0].entities[1] == entity_2);
-        assert!(entity_2_meta.instance_meta.archetype.0 == 0);
-        assert!(entity_2_meta.instance_meta.index == 1);
-
-        world.add_component(entity_1, B(2.));
-
-        let entity_1_meta = world.ecs_id_meta[entity_1.uindex()].clone().unwrap();
-        assert!(world.archetypes[1].entities[0] == entity_1);
-        assert!(world.archetypes[1].entities.len() == 1);
-        assert!(entity_1_meta.instance_meta.archetype.0 == 1);
-        assert!(entity_1_meta.instance_meta.index == 0);
-
-        let entity_2_meta = world.ecs_id_meta[entity_2.uindex()].clone().unwrap();
-        assert!(world.archetypes[0].entities[0] == entity_2);
         assert!(world.archetypes[0].entities.len() == 1);
-        assert!(entity_2_meta.instance_meta.archetype.0 == 0);
-        assert!(entity_2_meta.instance_meta.index == 0);
-
-        world.add_component(entity_2, B(2.));
-        assert!(world.archetypes[0].entities.len() == 0);
-        assert!(world.archetypes[1].entities.len() == 2);
+        assert!(world.archetypes[0].component_storages.len() == 0);
 
         let entity_1_meta = world.ecs_id_meta[entity_1.uindex()].clone().unwrap();
         assert!(world.archetypes[1].entities[0] == entity_1);
@@ -998,6 +972,38 @@ mod tests {
         let entity_2_meta = world.ecs_id_meta[entity_2.uindex()].clone().unwrap();
         assert!(world.archetypes[1].entities[1] == entity_2);
         assert!(entity_2_meta.instance_meta.archetype.0 == 1);
+        assert!(entity_2_meta.instance_meta.index == 1);
+
+        world.add_component(entity_1, B(2.));
+        assert!(world.archetypes[0].entities.len() == 2);
+
+        assert!(world.archetypes[1].entities[0] == entity_2);
+        assert!(world.archetypes[1].entities.len() == 1);
+        assert!(world.archetypes[2].entities[0] == entity_1);
+        assert!(world.archetypes[2].entities.len() == 1);
+
+        let entity_1_meta = world.ecs_id_meta[entity_1.uindex()].clone().unwrap();
+        assert!(entity_1_meta.instance_meta.archetype.0 == 2);
+        assert!(entity_1_meta.instance_meta.index == 0);
+
+        let entity_2_meta = world.ecs_id_meta[entity_2.uindex()].clone().unwrap();
+        assert!(entity_2_meta.instance_meta.archetype.0 == 1);
+        assert!(entity_2_meta.instance_meta.index == 0);
+
+        world.add_component(entity_2, B(2.));
+        assert!(world.archetypes[0].entities.len() == 2);
+        assert!(world.archetypes[1].entities.len() == 0);
+        assert!(world.archetypes[2].entities.len() == 2);
+
+        assert!(world.archetypes[2].entities[0] == entity_1);
+        assert!(world.archetypes[2].entities[1] == entity_2);
+
+        let entity_1_meta = world.ecs_id_meta[entity_1.uindex()].clone().unwrap();
+        assert!(entity_1_meta.instance_meta.archetype.0 == 2);
+        assert!(entity_1_meta.instance_meta.index == 0);
+
+        let entity_2_meta = world.ecs_id_meta[entity_2.uindex()].clone().unwrap();
+        assert!(entity_2_meta.instance_meta.archetype.0 == 2);
         assert!(entity_2_meta.instance_meta.index == 1);
     }
 
