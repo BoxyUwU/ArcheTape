@@ -12,7 +12,7 @@ pub trait TupleEntry: 'static {
     fn spawn_fn(
         self,
         archetype: &mut Archetype,
-        ecs_id_to_type_id: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>,
+        ecs_id_to_type_id: &HashMap<TypeId, EcsId, crate::utils::TypeIdHasherBuilder>,
     );
 
     fn collect_comp_ids(&self, ids: &mut Vec<EcsId>, world: &mut World);
@@ -30,7 +30,7 @@ impl<T: 'static, U: TupleEntry + 'static> TupleEntry for (T, U) {
     fn spawn_fn(
         self,
         archetype: &mut Archetype,
-        type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>,
+        type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::utils::TypeIdHasherBuilder>,
     ) {
         let (left, right) = self;
 
@@ -67,7 +67,7 @@ impl TupleEntry for () {
     fn spawn_fn(
         self,
         archetype: &mut Archetype,
-        _: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>,
+        _: &HashMap<TypeId, EcsId, crate::utils::TypeIdHasherBuilder>,
     ) {
         // This makes sure the same component was not added twice
         // TODO overwrite old component instead?

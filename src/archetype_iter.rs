@@ -38,7 +38,7 @@ pub struct QueryBorrow<
 
 pub trait QueryInfos: 'static {
     fn comp_ids(
-        type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>,
+        type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::utils::TypeIdHasherBuilder>,
     ) -> Vec<Option<EcsId>>;
 
     fn type_ids() -> Vec<Option<TypeId>>;
@@ -47,7 +47,7 @@ pub trait QueryInfos: 'static {
 macro_rules! impl_query_infos {
     ($($x:ident)*) => {
         impl<'b, 'guard: 'b, $($x: Borrow<'b, 'guard>,)*> QueryInfos for ($($x,)*) {
-            fn comp_ids(type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>) -> Vec<Option<EcsId>> {
+            fn comp_ids(type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::utils::TypeIdHasherBuilder>) -> Vec<Option<EcsId>> {
                 vec![$(
                     {
                         if let Some(id) = $x::type_id() {
@@ -88,7 +88,7 @@ macro_rules! impl_query_infos {
                 }
             }
 
-            pub fn acquire_locks(lock_lookup: &HashMap<EcsId, usize, crate::TypeIdHasherBuilder>, locks: &'guard [RwLock<()>], ecs_ids: &[Option<EcsId>]) -> ($($x::Lock,)*) {
+            pub fn acquire_locks(lock_lookup: &HashMap<EcsId, usize, crate::utils::TypeIdHasherBuilder>, locks: &'guard [RwLock<()>], ecs_ids: &[Option<EcsId>]) -> ($($x::Lock,)*) {
                 let mut n = 0;
                 ($({
                     n += 1;
@@ -268,7 +268,7 @@ pub unsafe trait Borrow<'b, 'guard: 'b>: Sized + 'static {
 
     /// Used to find matching archetypes for the query
     fn get_ecs_id(
-        type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>,
+        type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::utils::TypeIdHasherBuilder>,
     ) -> Option<EcsId>;
 
     fn iter_from_guard(guard: &'b mut Self::StorageBorrow) -> (usize, Self::Iter);
@@ -281,7 +281,7 @@ pub unsafe trait Borrow<'b, 'guard: 'b>: Sized + 'static {
 
     fn acquire_lock(
         comp_id: Option<EcsId>,
-        lock_lookup: &HashMap<EcsId, usize, crate::TypeIdHasherBuilder>,
+        lock_lookup: &HashMap<EcsId, usize, crate::utils::TypeIdHasherBuilder>,
         locks: &'guard [RwLock<()>],
     ) -> Self::Lock;
 
@@ -319,7 +319,7 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
     }
 
     fn get_ecs_id(
-        type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>,
+        type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::utils::TypeIdHasherBuilder>,
     ) -> Option<EcsId> {
         Some(type_id_to_ecs_id[&TypeId::of::<T>()])
     }
@@ -339,7 +339,7 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
 
     fn acquire_lock(
         comp_id: Option<EcsId>,
-        lock_lookup: &HashMap<EcsId, usize, crate::TypeIdHasherBuilder>,
+        lock_lookup: &HashMap<EcsId, usize, crate::utils::TypeIdHasherBuilder>,
         locks: &'guard [RwLock<()>],
     ) -> Self::Lock {
         let lock_idx = lock_lookup[&comp_id.unwrap()];
@@ -382,7 +382,7 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
     }
 
     fn get_ecs_id(
-        type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>,
+        type_id_to_ecs_id: &HashMap<TypeId, EcsId, crate::utils::TypeIdHasherBuilder>,
     ) -> Option<EcsId> {
         Some(type_id_to_ecs_id[&TypeId::of::<T>()])
     }
@@ -402,7 +402,7 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
 
     fn acquire_lock(
         comp_id: Option<EcsId>,
-        lock_lookup: &HashMap<EcsId, usize, crate::TypeIdHasherBuilder>,
+        lock_lookup: &HashMap<EcsId, usize, crate::utils::TypeIdHasherBuilder>,
         locks: &'guard [RwLock<()>],
     ) -> Self::Lock {
         let lock_idx = lock_lookup[&comp_id.unwrap()];
@@ -443,7 +443,7 @@ unsafe impl<'b, 'guard: 'b> Borrow<'b, 'guard> for Entities {
         }
     }
 
-    fn get_ecs_id(_: &HashMap<TypeId, EcsId, crate::TypeIdHasherBuilder>) -> Option<EcsId> {
+    fn get_ecs_id(_: &HashMap<TypeId, EcsId, crate::utils::TypeIdHasherBuilder>) -> Option<EcsId> {
         None
     }
 
@@ -454,7 +454,7 @@ unsafe impl<'b, 'guard: 'b> Borrow<'b, 'guard> for Entities {
 
     fn acquire_lock(
         _: Option<EcsId>,
-        _: &HashMap<EcsId, usize, crate::TypeIdHasherBuilder>,
+        _: &HashMap<EcsId, usize, crate::utils::TypeIdHasherBuilder>,
         _: &'guard [RwLock<()>],
     ) -> Self::Lock {
         ()

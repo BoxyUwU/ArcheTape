@@ -5,6 +5,7 @@ pub struct ArrayVec<T, const LEN: usize> {
     len: usize,
 }
 
+#[allow(dead_code)]
 impl<T, const LEN: usize> ArrayVec<T, LEN> {
     pub fn new() -> Self {
         assert!(LEN < isize::MAX as usize);
