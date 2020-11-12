@@ -307,11 +307,15 @@ pub struct ComponentMeta {
     pub name: Option<String>,
 }
 
+fn component_meta_drop_fn<T: 'static>(ptr: *mut core::mem::MaybeUninit<u8>) {
+    unsafe { core::ptr::drop_in_place::<T>(ptr as *mut T) }
+}
+
 impl ComponentMeta {
     /// Creates a ComponentMeta with the type_id and layout of the generic
     pub fn from_generic<T: 'static>() -> Self {
         Self {
-            drop_fn: Some(|ptr| unsafe { core::ptr::drop_in_place::<T>(ptr as *mut T) }),
+            drop_fn: Some(component_meta_drop_fn::<T>),
             layout: core::alloc::Layout::new::<T>(),
             type_id: Some(TypeId::of::<T>()),
             name: Some(core::any::type_name::<T>().to_owned()),
@@ -320,12 +324,10 @@ impl ComponentMeta {
 
     /// Creates a unit ComponentMeta, used for when the EcsId should hold no data when added as a component
     pub fn unit() -> Self {
-        pub struct NoData;
-
         Self {
             drop_fn: None,
-            layout: core::alloc::Layout::new::<NoData>(),
-            type_id: Some(TypeId::of::<NoData>()),
+            layout: core::alloc::Layout::new::<()>(),
+            type_id: Some(TypeId::of::<()>()),
             name: Some("No data".to_owned()),
         }
     }
@@ -362,6 +364,7 @@ impl World {
     }
 
     #[must_use]
+    /// Creates an entity builder for creating an entity. See the spawn!() macro for a more concise way to use the EntityBuilder
     pub fn spawn(&mut self) -> crate::entity_builder::EntityBuilder {
         let entity = self.entities.spawn();
 
@@ -373,6 +376,7 @@ impl World {
         }
     }
 
+    /// Despawns an entity, if the entity being despawned is added as a component to any entities it will be automatically removed
     pub fn despawn(&mut self, entity: EcsId) -> bool {
         if !self.entities.is_alive(entity) {
             return false;
@@ -403,7 +407,11 @@ impl World {
         let comp_id = self.get_or_create_type_id_ecsid::<T>();
         let mut component = core::mem::ManuallyDrop::new(component);
         unsafe {
-            self.add_component_dynamic(entity, comp_id, &mut component as *mut _ as *mut u8);
+            self.add_component_dynamic_with_data(
+                entity,
+                comp_id,
+                &mut component as *mut _ as *mut u8,
+            );
         }
     }
 
@@ -418,6 +426,30 @@ impl World {
         let comp_id = self.get_or_create_type_id_ecsid::<T>();
         self.get_component_mut_dynamic(entity, comp_id)
             .map(|ptr| unsafe { &mut *{ ptr.cast::<T>() } })
+    }
+
+    /// Adds an entity as a dataless component
+    /// This method will panic if a component with the ID of component_id expects data. Entities by default expect no data.
+    pub fn add_component_dynamic(&mut self, entity: EcsId, component_id: EcsId) {
+        assert!(self.entities.is_alive(entity));
+        assert!(self.entities.is_alive(component_id));
+        assert!(
+            self.get_entity_meta(component_id)
+                .unwrap()
+                .component_meta
+                .type_id
+                .unwrap()
+                == TypeId::of::<()>()
+        );
+
+        let mut component = core::mem::ManuallyDrop::new(());
+        unsafe {
+            self.add_component_dynamic_with_data(
+                entity,
+                component_id,
+                &mut component as *mut _ as *mut u8,
+            );
+        }
     }
 }
 
@@ -541,7 +573,7 @@ impl World {
 
     /// Safety: component_ptr must point to data that matches the component_meta of component_id.
     /// The data must also not be used after calling this function.
-    pub unsafe fn add_component_dynamic(
+    pub unsafe fn add_component_dynamic_with_data(
         &mut self,
         entity: EcsId,
         comp_id: EcsId,
@@ -641,7 +673,8 @@ impl World {
                     }),
             )
         {
-            current_storage.swap_move_element_to_other_vec(target_storage, entity_idx)
+            // Safe because component_storages in archetypes are sorted and we skip the component_storage that isn't the same
+            unsafe { current_storage.swap_move_element_to_other_vec(target_storage, entity_idx) }
         }
 
         if skipped_idx.is_none() {
@@ -773,7 +806,8 @@ impl World {
                     .map(|target_storage| target_storage.get_mut()),
             )
         {
-            current_storage.swap_move_element_to_other_vec(target_storage, entity_idx)
+            // Safe because component_storages in archetypes are sorted and we skip the component_storage that isn't the same
+            unsafe { current_storage.swap_move_element_to_other_vec(target_storage, entity_idx) }
         }
 
         if skipped_storage.is_none() {

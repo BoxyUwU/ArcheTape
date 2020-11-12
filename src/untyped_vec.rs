@@ -35,13 +35,6 @@ pub struct UntypedVec {
 }
 
 impl UntypedVec {
-    // Safety: it's safe to call drop_in_place here because we know that this function will only be called with pointers to T that are aligned and nonnull
-    // Safety: drop_in_place says to "uphold any safety invariants of T that are related to dropping" but we just dont do this :)
-    //
-    // let drop_fn: fn(*mut MaybeUninit<u8>) -> () = |ptr| unsafe {
-    //     std::ptr::drop_in_place::<T>(ptr as *mut T);
-    // };
-
     pub fn new_from_untyped_vec(from: &mut UntypedVec) -> Self {
         // Safe because the passed in untyped vec was either made safely or with unsafe code
         unsafe { Self::new_from_raw(from.type_info.clone()) }
@@ -148,8 +141,6 @@ impl UntypedVec {
             return None;
         }
 
-        assert!(self.len % self.type_info.layout.size() == 0);
-
         if self.type_info.layout.size() == 0 {
             if element < self.len {
                 Some(self.data.as_ptr())
@@ -157,6 +148,7 @@ impl UntypedVec {
                 None
             }
         } else {
+            assert!(self.len % self.type_info.layout.size() == 0);
             if element < { self.len / self.type_info.layout.size() } {
                 unsafe {
                     Some(
@@ -176,8 +168,6 @@ impl UntypedVec {
             return None;
         }
 
-        assert!(self.len % self.type_info.layout.size() == 0);
-
         if self.type_info.layout.size() == 0 {
             if element < self.len {
                 Some(self.data.as_ptr())
@@ -185,6 +175,7 @@ impl UntypedVec {
                 None
             }
         } else {
+            assert!(self.len % self.type_info.layout.size() == 0);
             if element < { self.len / self.type_info.layout.size() } {
                 unsafe {
                     Some(
@@ -226,7 +217,12 @@ impl UntypedVec {
         }
     }
 
-    pub fn swap_move_element_to_other_vec(&mut self, other: &mut UntypedVec, element: usize) {
+    /// Safety: The other UntypedVec must be of the same type
+    pub unsafe fn swap_move_element_to_other_vec(
+        &mut self,
+        other: &mut UntypedVec,
+        element: usize,
+    ) {
         assert!(self.type_info == other.type_info);
         assert!(self.len > 0);
         assert!(
@@ -542,12 +538,16 @@ mod tests {
         }
 
         let mut untyped_vec_2 = untyped_vec_new::<Wrap>();
+
+        // TODO: proper workaround
         #[cfg(miri)]
         {
-            untyped_vec_2.type_info.drop_fn = untyped_vec_1.type_info.drop_fn;
+            untyped_vec_2.type_info.drop_fn = untyped_vec_1.type_info.drop_fn.clone();
         }
 
-        untyped_vec_1.swap_move_element_to_other_vec(&mut untyped_vec_2, 0);
+        unsafe {
+            untyped_vec_1.swap_move_element_to_other_vec(&mut untyped_vec_2, 0);
+        }
 
         assert!(dropped == false);
         assert!(untyped_vec_1.len == 0);
@@ -582,12 +582,15 @@ mod tests {
 
         let mut untyped_vec_2 = untyped_vec_new::<Wrap>();
 
+        // TODO: proper workaround
         #[cfg(miri)]
         {
-            untyped_vec_2.type_info.drop_fn = untyped_vec_1.type_info.drop_fn;
+            untyped_vec_2.type_info.drop_fn = untyped_vec_1.type_info.drop_fn.clone();
         }
 
-        untyped_vec_1.swap_move_element_to_other_vec(&mut untyped_vec_2, 1);
+        unsafe {
+            untyped_vec_1.swap_move_element_to_other_vec(&mut untyped_vec_2, 1);
+        }
 
         assert!(dropped_1 == false);
         assert!(dropped_2 == false);
