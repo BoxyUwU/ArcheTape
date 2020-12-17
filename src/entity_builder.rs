@@ -157,7 +157,7 @@ impl<'w, T: TupleEntry> EntityBuilder<'w, T> {
                     archetype: ArchIndex(world.archetypes.len() - 1),
                     index: 0,
                 },
-                component_meta: crate::world::ComponentMeta::unit(),
+                component_meta,
             };
             world.set_entity_meta(entity, entity_meta);
         }
