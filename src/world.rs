@@ -54,7 +54,7 @@ pub struct Archetype {
     pub(crate) component_storages: Vec<UnsafeCell<UntypedVec>>,
 
     /// The order of this vec is guaranteed to be the same as the order of component storages,
-    /// this means that you can .iter().position(|| ...) to find the index in component_storages for an EcsId
+    /// this means that you can .iter().position(|id| ...) to find the index in component_storages for an EcsId
     pub(crate) comp_ids: Vec<EcsId>,
 
     pub(crate) add_remove_cache: AddRemoveCache,
@@ -370,6 +370,7 @@ impl World {
 
         crate::entity_builder::EntityBuilder {
             entity,
+            component_meta: ComponentMeta::unit(),
             world: self,
             components_len: 0,
             components: (),
@@ -454,6 +455,23 @@ impl World {
 }
 
 impl World {
+    #[must_use]
+    /// All subsequent uses of this entity as a component must be valid for the given ComponentMeta
+    pub unsafe fn spawn_with_component_meta(
+        &mut self,
+        component_meta: ComponentMeta,
+    ) -> crate::entity_builder::EntityBuilder {
+        let entity = self.entities.spawn();
+
+        crate::entity_builder::EntityBuilder {
+            entity,
+            component_meta,
+            world: self,
+            components_len: 0,
+            components: (),
+        }
+    }
+
     pub fn get_or_create_type_id_ecsid<T: 'static>(&mut self) -> EcsId {
         let comp_id = self.type_id_to_ecs_id.get(&TypeId::of::<T>());
         if let Some(comp_id) = comp_id {

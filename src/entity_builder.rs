@@ -95,6 +95,7 @@ where
     T: TupleEntry,
 {
     pub(crate) entity: crate::entities::EcsId,
+    pub(crate) component_meta: crate::world::ComponentMeta,
     pub(crate) world: &'w mut World,
     pub(crate) components_len: usize,
     pub(crate) components: T,
@@ -105,6 +106,7 @@ impl<'w, T: TupleEntry> EntityBuilder<'w, T> {
     pub fn with<C: 'static>(self, component: C) -> EntityBuilder<'w, (C, T)> {
         EntityBuilder {
             entity: self.entity,
+            component_meta: self.component_meta,
             world: self.world,
             components_len: self.components_len + 1,
             components: (component, self.components),
@@ -114,6 +116,7 @@ impl<'w, T: TupleEntry> EntityBuilder<'w, T> {
     pub fn build(self) -> crate::entities::EcsId {
         let Self {
             world,
+            component_meta,
             entity,
             components_len,
             components,
@@ -133,7 +136,7 @@ impl<'w, T: TupleEntry> EntityBuilder<'w, T> {
                     archetype: archetype_idx,
                     index: entities_len - 1,
                 },
-                component_meta: crate::world::ComponentMeta::unit(),
+                component_meta,
             };
             world.set_entity_meta(entity, entity_meta);
         } else {
