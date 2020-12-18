@@ -312,6 +312,15 @@ fn component_meta_drop_fn<T: 'static>(ptr: *mut core::mem::MaybeUninit<u8>) {
 }
 
 impl ComponentMeta {
+    pub fn from_size_align(size: usize, align: usize) -> Self {
+        Self {
+            drop_fn: None,
+            layout: core::alloc::Layout::from_size_align(size, align).unwrap(),
+            type_id: None,
+            name: None,
+        }
+    }
+
     /// Creates a ComponentMeta with the type_id and layout of the generic
     pub fn from_generic<T: 'static>() -> Self {
         Self {
