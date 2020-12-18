@@ -66,6 +66,7 @@ impl UntypedVec {
         self.len / self.type_info.layout.size()
     }
 
+    /// Length in bytes
     pub fn raw_len(&self) -> usize {
         self.len
     }

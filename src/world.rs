@@ -14,7 +14,7 @@ pub struct AddRemoveCache {
 }
 
 impl AddRemoveCache {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             cache: ArrayVec::new(),
             lookup: HashMap::with_capacity_and_hasher(16, crate::utils::TypeIdHasherBuilder()),
@@ -60,97 +60,7 @@ pub struct Archetype {
     pub(crate) add_remove_cache: AddRemoveCache,
 }
 
-use crate::entity_builder::TupleEntry;
 impl Archetype {
-    pub fn new<T: TupleEntry>(entity: EcsId, tuple: T, comp_ids: Vec<EcsId>) -> Self {
-        fn new_recursive<T: TupleEntry>(
-            entity: EcsId,
-            tuple: T,
-            comp_ids: Vec<EcsId>,
-            current_comp_id_idx: usize,
-            mut untyped_vecs: Vec<UnsafeCell<UntypedVec>>,
-        ) -> Archetype {
-            if let Some((left, right)) = tuple.next() {
-                let mut untyped_vec = unsafe {
-                    UntypedVec::new_from_raw(crate::untyped_vec::TypeInfo::new(
-                        comp_ids[current_comp_id_idx],
-                        core::alloc::Layout::new::<T::Left>(),
-                        Some(|ptr| core::ptr::drop_in_place::<T::Left>(ptr as *mut T::Left)),
-                    ))
-                };
-
-                unsafe {
-                    use core::mem::ManuallyDrop;
-                    use core::mem::MaybeUninit;
-
-                    let mut left: ManuallyDrop<T::Left> = ManuallyDrop::new(left);
-                    untyped_vec.push_raw(&mut left as *mut _ as *mut MaybeUninit<u8>);
-                }
-
-                untyped_vecs.push(UnsafeCell::new(untyped_vec));
-                return new_recursive(
-                    entity,
-                    right,
-                    comp_ids,
-                    current_comp_id_idx + 1,
-                    untyped_vecs,
-                );
-            }
-
-            let comp_ids_len = comp_ids.len();
-
-            // We're at the bottom of the tuple
-            Archetype {
-                comp_ids,
-                lookup: HashMap::with_capacity_and_hasher(
-                    comp_ids_len,
-                    crate::utils::TypeIdHasherBuilder(),
-                ),
-
-                entities: vec![entity],
-                component_storages: untyped_vecs,
-
-                add_remove_cache: AddRemoveCache::new(),
-            }
-        }
-
-        let comp_ids_len = comp_ids.len();
-        let mut new_archetype =
-            new_recursive(entity, tuple, comp_ids, 0, Vec::with_capacity(comp_ids_len));
-
-        // TODO there's no need to sort twice they should have the same ordering
-        new_archetype.comp_ids.sort();
-        new_archetype
-            .component_storages
-            .sort_by(|storage_1, storage_2| {
-                let storage_1 = unsafe { &*storage_1.get() };
-                let storage_2 = unsafe { &*storage_2.get() };
-
-                Ord::cmp(
-                    &storage_1.get_type_info().comp_id,
-                    &storage_2.get_type_info().comp_id,
-                )
-            });
-
-        new_archetype.lookup.clear();
-        for (n, &id) in new_archetype.comp_ids.iter().enumerate() {
-            new_archetype.lookup.insert(id, n);
-        }
-
-        assert!(new_archetype
-            .comp_ids
-            .iter()
-            .zip(
-                new_archetype
-                    .component_storages
-                    .iter()
-                    .map(|storage| unsafe { &*storage.get() })
-            )
-            .all(|(comp_id, storage)| *comp_id == storage.get_type_info().comp_id));
-
-        new_archetype
-    }
-
     pub fn from_archetype(from: &mut Archetype) -> Archetype {
         Archetype {
             lookup: from.lookup.clone(),
@@ -376,13 +286,22 @@ impl World {
     /// Creates an entity builder for creating an entity. See the spawn!() macro for a more concise way to use the EntityBuilder
     pub fn spawn(&mut self) -> crate::entity_builder::EntityBuilder {
         let entity = self.entities.spawn();
+        crate::entity_builder::EntityBuilder::new(self, entity, ComponentMeta::unit())
+    }
 
-        crate::entity_builder::EntityBuilder {
-            entity,
-            component_meta: ComponentMeta::unit(),
-            world: self,
-            components_len: 0,
-            components: (),
+    #[must_use]
+    /// Same as ``World::spawn`` except takes a capacity to initialise the component storage to
+    pub fn spawn_with_capacity(&mut self, capacity: usize) -> crate::entity_builder::EntityBuilder {
+        let entity = self.entities.spawn();
+        if capacity == 0 {
+            crate::entity_builder::EntityBuilder::new(self, entity, ComponentMeta::unit())
+        } else {
+            crate::entity_builder::EntityBuilder::with_capacity(
+                self,
+                entity,
+                ComponentMeta::unit(),
+                std::num::NonZeroUsize::new(capacity).unwrap(),
+            )
         }
     }
 
@@ -472,13 +391,7 @@ impl World {
     ) -> crate::entity_builder::EntityBuilder {
         let entity = self.entities.spawn();
 
-        crate::entity_builder::EntityBuilder {
-            entity,
-            component_meta,
-            world: self,
-            components_len: 0,
-            components: (),
-        }
+        crate::entity_builder::EntityBuilder::new(self, entity, component_meta)
     }
 
     pub fn get_or_create_type_id_ecsid<T: 'static>(&mut self) -> EcsId {
@@ -902,9 +815,12 @@ impl World {
 
         let component_storage_idx = archetype.lookup[&comp_id];
 
-        archetype.component_storages[component_storage_idx]
-            .get_mut()
-            .get_mut_raw(entity_idx)
+        Some(
+            archetype.component_storages[component_storage_idx]
+                .get_mut()
+                .get_mut_raw(entity_idx)
+                .unwrap(),
+        )
     }
 }
 
