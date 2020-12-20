@@ -74,7 +74,7 @@ impl<'a> EntityBuilder<'a> {
 
         let data =
             NonNull::new(unsafe { alloc(std::alloc::Layout::from_size_align(cap, 1).unwrap()) })
-                .unwrap();
+                .expect("Failed to allocate for EntityBuilder");
 
         Self {
             data,
@@ -114,7 +114,7 @@ impl<'a> EntityBuilder<'a> {
         let component_size = self
             .world
             .get_entity_meta(component_id)
-            .unwrap() // TODO: Maybe not unwrap here...?
+            .expect("Dead entity may not be used as a component")
             .component_meta
             .layout
             .size();
