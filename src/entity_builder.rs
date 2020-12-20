@@ -1,9 +1,9 @@
+use std::ptr::NonNull;
 use std::{
     alloc::{alloc, dealloc, realloc},
     collections::HashMap,
     mem::{ManuallyDrop, MaybeUninit},
 };
-use std::{num::NonZeroUsize, ptr::NonNull};
 
 use crate::{
     untyped_vec::{TypeInfo, UntypedVec},
@@ -66,9 +66,12 @@ impl<'a> EntityBuilder<'a> {
         world: &'a mut World,
         entity: EcsId,
         component_meta: ComponentMeta,
-        cap: NonZeroUsize,
+        cap: usize,
     ) -> Self {
-        let cap = cap.into();
+        if cap == 0 {
+            return Self::new(world, entity, component_meta);
+        }
+
         let data =
             NonNull::new(unsafe { alloc(std::alloc::Layout::from_size_align(cap, 1).unwrap()) })
                 .unwrap();

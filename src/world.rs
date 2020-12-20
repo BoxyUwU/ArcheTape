@@ -293,16 +293,12 @@ impl World {
     /// Same as ``World::spawn`` except takes a capacity to initialise the component storage to
     pub fn spawn_with_capacity(&mut self, capacity: usize) -> crate::entity_builder::EntityBuilder {
         let entity = self.entities.spawn();
-        if capacity == 0 {
-            crate::entity_builder::EntityBuilder::new(self, entity, ComponentMeta::unit())
-        } else {
-            crate::entity_builder::EntityBuilder::with_capacity(
-                self,
-                entity,
-                ComponentMeta::unit(),
-                std::num::NonZeroUsize::new(capacity).unwrap(),
-            )
-        }
+        crate::entity_builder::EntityBuilder::with_capacity(
+            self,
+            entity,
+            ComponentMeta::unit(),
+            capacity,
+        )
     }
 
     /// Despawns an entity, if the entity being despawned is added as a component to any entities it will be automatically removed
