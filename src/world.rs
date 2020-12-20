@@ -173,12 +173,27 @@ impl Archetype {
         new_archetype
     }
 
-    pub fn despawn(&mut self, entity: EcsId, entity_idx: usize) -> bool {
+    pub fn despawn(
+        &mut self,
+        entity: EcsId,
+        entity_idx: usize,
+        entity_metas: &mut [Option<EntityMeta>],
+    ) -> bool {
         assert!(self.entities[entity_idx] == entity);
         self.entities.swap_remove(entity_idx);
         for storage in self.component_storages.iter_mut().map(UnsafeCell::get_mut) {
             storage.swap_remove(entity_idx);
         }
+        entity_metas[entity.uindex()] = None;
+
+        if let Some(&swapped_entity) = self.entities.get(entity_idx) {
+            entity_metas[swapped_entity.uindex()]
+                .as_mut()
+                .unwrap()
+                .instance_meta
+                .index = entity_idx;
+        }
+
         false
     }
 
@@ -317,10 +332,13 @@ impl World {
         let InstanceMeta { archetype, index } =
             self.get_entity_meta(entity).unwrap().instance_meta.clone();
 
-        self.archetypes[archetype.0].despawn(entity, index);
-        self.remove_entity_meta(entity);
+        self.archetypes[archetype.0].despawn(entity, index, &mut self.ecs_id_meta);
         self.entities.despawn(entity);
         true
+    }
+
+    pub fn is_alive(&self, entity: EcsId) -> bool {
+        self.entities.is_alive(entity)
     }
 
     pub fn query<T: QueryInfos>(&self) -> Query<T> {
@@ -424,14 +442,6 @@ impl World {
                     self.ecs_id_meta.resize_with(entity.uindex(), || None);
                     self.ecs_id_meta.push(new_meta);
                 }
-            }
-        }
-    }
-
-    pub(crate) fn remove_entity_meta(&mut self, entity: EcsId) {
-        if self.entities.is_alive(entity) {
-            if let Some(meta) = self.ecs_id_meta.get_mut(entity.uindex()) {
-                *meta = None;
             }
         }
     }
@@ -1012,6 +1022,69 @@ mod tests {
         }
         for &entity in entities.iter() {
             world.remove_component::<B>(entity);
+        }
+    }
+
+    #[test]
+    pub fn despawn_meta_update() {
+        let mut world = World::new();
+
+        let e1 = world.spawn().with(10_u32).build();
+        let e2 = world.spawn().with(12_u32).build();
+        let e3 = world.spawn().with(14_u32).build();
+
+        assert!(world.despawn(e1));
+
+        assert!(world.is_alive(e1) == false);
+        assert!(world.ecs_id_meta[e1.uindex()].is_none());
+
+        assert!(world.is_alive(e2));
+        assert!(world.is_alive(e3));
+
+        assert!(*world.get_component_mut::<u32>(e2).unwrap() == 12);
+        assert!(*world.get_component_mut::<u32>(e3).unwrap() == 14);
+    }
+
+    #[test]
+    pub fn despawn_component_entity() {
+        return;
+        let mut world = World::new();
+
+        unsafe {
+            let component_entity = world
+                .spawn_with_component_meta(ComponentMeta::from_generic::<u32>())
+                .build();
+
+            let e1 = world
+                .spawn()
+                .with_dynamic(&mut 10_u32 as *mut _ as *mut _, component_entity)
+                .build();
+            let e2 = world
+                .spawn()
+                .with_dynamic(&mut 10_u32 as *mut _ as *mut _, component_entity)
+                .build();
+            let e3 = world
+                .spawn()
+                .with_dynamic(&mut 10_u32 as *mut _ as *mut _, component_entity)
+                .build();
+
+            world.despawn(component_entity);
+
+            assert!(world.archetypes.len() == 2);
+
+            let assert_meta = |world: &mut World, entity: EcsId, archetype_idx, entity_idx| {
+                let meta = world.ecs_id_meta[entity.uindex()].as_ref().unwrap();
+                assert!(meta.instance_meta.archetype.0 == archetype_idx);
+                assert!(meta.instance_meta.index == entity_idx);
+            };
+
+            assert!(world.archetypes[0].entities == &[e1, e2, e3]);
+            assert_meta(&mut world, e1, 0, 0);
+            assert_meta(&mut world, e2, 0, 1);
+            assert_meta(&mut world, e3, 0, 2);
+
+            assert!(world.archetypes[1].entities.len() == 0);
+            assert!(world.ecs_id_meta[component_entity.uindex()].is_none());
         }
     }
 }
