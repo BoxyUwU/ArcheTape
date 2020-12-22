@@ -106,6 +106,25 @@ impl<'a> EntityBuilder<'a> {
         self.cap = new_size;
     }
 
+    /// Adds an entity as a dataless component
+    ///
+    /// This method will panic if a component with the ID of component_id expects data. Entities by default expect no data.
+    pub fn with_dynamic(mut self, component_id: EcsId) -> Self {
+        assert!(
+            self.world
+                .get_entity_meta(component_id)
+                .unwrap()
+                .component_meta
+                .type_id
+                == Some(std::any::TypeId::of::<()>())
+        );
+
+        self.comp_ids.push(component_id);
+        self.num_components += 1;
+
+        self
+    }
+
     /// Safety:
     ///  data behind ``component`` must not be used again.
     ///  data behind ``component`` must be a valid instance of the type given by ``component_id``

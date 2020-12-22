@@ -372,6 +372,7 @@ impl World {
     }
 
     /// Adds an entity as a dataless component
+    ///
     /// This method will panic if a component with the ID of component_id expects data. Entities by default expect no data.
     pub fn add_component_dynamic(&mut self, entity: EcsId, component_id: EcsId) {
         assert!(self.entities.is_alive(entity));
