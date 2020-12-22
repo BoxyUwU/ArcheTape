@@ -109,7 +109,11 @@ impl<'a> EntityBuilder<'a> {
     /// Safety:
     ///  data behind ``component`` must not be used again.
     ///  data behind ``component`` must be a valid instance of the type given by ``component_id``
-    pub unsafe fn with_dynamic(mut self, component: *mut u8, component_id: EcsId) -> Self {
+    pub unsafe fn with_dynamic_with_data(
+        mut self,
+        component: *mut u8,
+        component_id: EcsId,
+    ) -> Self {
         self.comp_ids.push(component_id);
         let component_size = self
             .world
@@ -141,7 +145,7 @@ impl<'a> EntityBuilder<'a> {
     pub fn with<C: 'static>(self, component: C) -> Self {
         let mut component = ManuallyDrop::new(component);
         let component_id = self.world.get_or_create_type_id_ecsid::<C>();
-        unsafe { self.with_dynamic(&mut component as *mut _ as *mut _, component_id) }
+        unsafe { self.with_dynamic_with_data(&mut component as *mut _ as *mut _, component_id) }
     }
 
     pub fn build(mut self) -> EcsId {
@@ -176,7 +180,6 @@ impl<'a> EntityBuilder<'a> {
                         == archetype.entities.len()
                 );
             }
-
             let entity_idx = self.world.archetypes[arch_index.0].entities.len() - 1;
             let entity_meta = EntityMeta {
                 instance_meta: InstanceMeta {

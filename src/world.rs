@@ -1057,15 +1057,15 @@ mod tests {
 
             let e1 = world
                 .spawn()
-                .with_dynamic(&mut 10_u32 as *mut _ as *mut _, component_entity)
+                .with_dynamic_with_data(&mut 10_u32 as *mut _ as *mut _, component_entity)
                 .build();
             let e2 = world
                 .spawn()
-                .with_dynamic(&mut 10_u32 as *mut _ as *mut _, component_entity)
+                .with_dynamic_with_data(&mut 10_u32 as *mut _ as *mut _, component_entity)
                 .build();
             let e3 = world
                 .spawn()
-                .with_dynamic(&mut 10_u32 as *mut _ as *mut _, component_entity)
+                .with_dynamic_with_data(&mut 10_u32 as *mut _ as *mut _, component_entity)
                 .build();
 
             world.despawn(component_entity);
