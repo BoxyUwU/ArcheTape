@@ -1048,6 +1048,7 @@ mod tests {
 
     #[test]
     pub fn despawn_component_entity() {
+        // TODO: Removing entities when they despawn not yet implemented
         return;
         let mut world = World::new();
 
@@ -1087,5 +1088,28 @@ mod tests {
             assert!(world.archetypes[1].entities.len() == 0);
             assert!(world.ecs_id_meta[component_entity.uindex()].is_none());
         }
+    }
+
+    // TODO: Boxy can you make the following tests actually work?
+    // Currently they basically just want to not panic, but they should check capacity if possible
+    #[test]
+    pub fn spawn() -> () {
+        let mut world = World::new();
+        let entity = world.spawn().build();
+        assert_eq!(entity, EcsId::new(0, 0));
+    }
+
+    #[test]
+    pub fn spawn_with_capacity() -> () {
+        let mut world = World::new();
+        let entity = world.spawn_with_capacity(32).build();
+        assert_eq!(entity, EcsId::new(0, 0));
+    }
+
+    #[test]
+    pub fn spawn_with_capacity_zero() -> () {
+        let mut world = World::new();
+        let entity = world.spawn_with_capacity(0).build();
+        assert_eq!(entity, EcsId::new(0, 0));
     }
 }

@@ -81,8 +81,10 @@ impl UntypedVec {
             let layout = Layout::from_size_align(new_cap, self.type_info.layout.align()).unwrap();
 
             // Safe because we assert size is not 0
-            let ptr: *mut u8 = unsafe { alloc(layout) };
-            let ptr = NonNull::new(ptr).unwrap();
+            let ptr = unsafe {
+                let ptr = alloc(layout);
+                NonNull::new_unchecked(ptr)
+            };
 
             self.cap = new_cap;
             self.data = ptr;
@@ -96,9 +98,10 @@ impl UntypedVec {
             // Safe because the pointer we pass in is always made from this allocator because
             // the only way to get a cap > 0 is if the other branch has run and allocated memory
             // Safe because new_cap is < isize::MAX
-            let ptr = self.data.as_ptr();
-            let ptr: *mut u8 = unsafe { realloc(ptr, old_layout, new_cap) };
-            let ptr = NonNull::new(ptr).unwrap();
+            let ptr = unsafe {
+                let ptr = realloc(self.data.as_ptr(), old_layout, new_cap);
+                NonNull::new_unchecked(ptr)
+            };
 
             self.cap = new_cap;
             self.data = ptr;

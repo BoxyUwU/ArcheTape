@@ -4,6 +4,7 @@
 #![feature(unsafe_block_in_unsafe_fn)]
 #![feature(unsafe_cell_get_mut)]
 #![feature(option_unwrap_none)]
+#![feature(option_expect_none)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 pub mod entities;

@@ -1,9 +1,19 @@
+use std::fmt::Display;
+
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct EcsId(u64);
 
+impl Display for EcsId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(gen {}, index {})", self.generation(), self.index())
+    }
+}
+
 impl EcsId {
+    // Upper 32 bits
     const GENERATION_MASK: u64 = !Self::INDEX_MASK;
+    // Lower 32 bits
     const INDEX_MASK: u64 = u64::MAX >> 32;
 
     pub fn generation(&self) -> u32 {
@@ -45,8 +55,11 @@ impl Entities {
             }
         };
 
-        assert!(idx <= u32::MAX as usize);
-        let generation = *self.generations.get_mut(idx).unwrap();
+        assert!(
+            idx <= u32::MAX as usize,
+            format!("Out of generation indexes, tried to use index {}", idx)
+        );
+        let generation = self.generations[idx];
         EcsId::new(idx as u32, generation)
     }
 
@@ -63,7 +76,11 @@ impl Entities {
     }
 
     pub fn is_alive(&self, entity: EcsId) -> bool {
-        *self.generations.get(entity.uindex()).unwrap() == entity.generation()
+        *self
+            .generations
+            .get(entity.uindex())
+            .expect(format!("{} is not a valid EcsId", entity).as_ref())
+            == entity.generation()
     }
 }
 
@@ -115,6 +132,14 @@ mod tests {
         assert!(entities.generations.len() == 1);
         assert!(*entities.generations.get(0).unwrap() == 1);
         assert!(entities.is_alive(entity) == false);
+    }
+
+    #[test]
+    #[should_panic(expected = "(gen 4294967295, index 4294967295) is not a valid EcsId")]
+    pub fn despawn_invalid() {
+        let entities = Entities::new();
+        let invalid_id = EcsId(u64::MAX);
+        let _ = entities.is_alive(invalid_id);
     }
 
     #[test]

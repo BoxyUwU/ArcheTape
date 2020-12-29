@@ -1,6 +1,6 @@
 use std::ptr::NonNull;
 use std::{
-    alloc::{alloc, dealloc, realloc},
+    alloc::{alloc, dealloc, realloc, handle_alloc_error},
     collections::HashMap,
     mem::{ManuallyDrop, MaybeUninit},
 };
@@ -30,6 +30,7 @@ impl<'a> Drop for EntityBuilder<'a> {
         unsafe {
             dealloc(
                 self.data.as_ptr(),
+                // Safe as long as cap != 0, which should never happen
                 std::alloc::Layout::from_size_align(self.cap, 1).unwrap(),
             )
         };
@@ -41,11 +42,18 @@ impl<'a> Drop for EntityBuilder<'a> {
 impl<'a> EntityBuilder<'a> {
     pub(crate) fn new(world: &'a mut World, entity: EcsId, component_meta: ComponentMeta) -> Self {
         let cap = std::mem::size_of::<EcsId>();
-        assert!(cap != 0);
+        assert!(cap != 0, "EcsId zero size, this should never happen!!");
 
-        let data =
-            NonNull::new(unsafe { alloc(std::alloc::Layout::from_size_align(cap, 1).unwrap()) })
-                .unwrap();
+        let data = unsafe {
+            // Any non-zero size with 1 align is safe
+            let layout = std::alloc::Layout::from_size_align(cap, 1).unwrap();
+            let ptr = alloc(layout);
+            if ptr.is_null() {
+                handle_alloc_error(layout);
+            }
+
+            NonNull::new_unchecked(ptr)
+        };
 
         Self {
             data,
@@ -72,9 +80,16 @@ impl<'a> EntityBuilder<'a> {
             return Self::new(world, entity, component_meta);
         }
 
-        let data =
-            NonNull::new(unsafe { alloc(std::alloc::Layout::from_size_align(cap, 1).unwrap()) })
-                .expect("Failed to allocate for EntityBuilder");
+        let data = unsafe {
+            // Any non-zero size with 1 align is safe
+            let layout = std::alloc::Layout::from_size_align(cap, 1).unwrap();
+            let ptr = alloc(layout);
+            if ptr.is_null() {
+                handle_alloc_error(layout);
+            }
+
+            NonNull::new_unchecked(ptr)
+        };
 
         Self {
             data,
@@ -92,17 +107,26 @@ impl<'a> EntityBuilder<'a> {
     }
 
     fn realloc(&mut self, new_size: usize) {
-        assert!(new_size < isize::MAX as usize);
+        assert!(new_size < isize::MAX as usize, "Cannot allocate more than isize::MAX bytes");
+        assert!(new_size > 0, "Cannot reallocate a capacity of zero");
 
-        let new_ptr = unsafe {
-            realloc(
+        unsafe {
+            // Safe as long as cap != 0, which should never happen
+            let layout = std::alloc::Layout::from_size_align(self.cap, 1).unwrap();
+            let new_ptr = realloc(
                 self.data.as_ptr(),
-                std::alloc::Layout::from_size_align(self.cap, 1).unwrap(),
+                layout,
                 new_size,
-            )
-        };
+            );
 
-        self.data = NonNull::new(new_ptr).unwrap();
+            // if realloc returns null, reallocation failed, but the old pointer is still valid
+            if new_ptr.is_null() {
+                handle_alloc_error(layout);
+            } else {
+                self.data = NonNull::new_unchecked(new_ptr);
+            }
+        }
+
         self.cap = new_size;
     }
 
@@ -271,8 +295,8 @@ impl<'a> EntityBuilder<'a> {
             crate::utils::TypeIdHasherBuilder(),
         );
         for (n, &id) in self.comp_ids.iter().enumerate() {
-            // unwrap_none to assert that we dont insert the same component type twice
-            lookup.insert(id, n).unwrap_none();
+            // Don't insert the same component type twice
+            lookup.insert(id, n).expect_none("Component type already added");
         }
 
         assert!(self
