@@ -271,8 +271,11 @@ impl<'a> EntityBuilder<'a> {
             crate::utils::TypeIdHasherBuilder(),
         );
         for (n, &id) in self.comp_ids.iter().enumerate() {
-            // unwrap_none to assert that we dont insert the same component type twice
-            lookup.insert(id, n).unwrap_none();
+            // Dont add the same component twice
+            assert!(
+                lookup.insert(id, n).is_none(),
+                "Attempted to add the same component twice in EntityBuilder"
+            );
         }
 
         assert!(self
