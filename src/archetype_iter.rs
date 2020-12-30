@@ -164,7 +164,7 @@ macro_rules! impl_query_infos {
             #[allow(non_snake_case)]
             #[inline(always)]
             fn next(&mut self) -> Option<Self::Returns> {
-                if self.0.is_empty() {
+                if self.0.len() == 0 {
                     return None;
                 } else {
                     let ($($x,)*) = self;
@@ -259,6 +259,8 @@ pub trait StorageBorrows<'guard, T: QueryInfos + 'static> {}
 /// SAFETY: The length returned from iter_from_guards **must** be accurate as we rely on being able to call get_unchecked() if one iterator returns Some(_)
 ///
 /// SAFETY: type_id function should return the same type_id used in the lookup inside get_ecs_id
+///
+/// SAFETY: <Borrow::Iter as ExactSizeIterator>::len must correctly give the amount of remaining elements
 pub unsafe trait Borrow<'b, 'guard: 'b>: Sized + 'static {
     type Of: 'static;
     type Returns: 'b;
