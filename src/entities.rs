@@ -55,10 +55,10 @@ impl Entities {
             }
         };
 
-        assert!(
-            idx <= u32::MAX as usize,
-            format!("Out of generation indexes, tried to use index {}", idx)
-        );
+        if idx > u32::MAX as usize {
+            todo!("Handle out of generations");
+        }
+
         let generation = self.generations[idx];
         EcsId::new(idx as u32, generation)
     }
@@ -81,23 +81,22 @@ impl Entities {
             .generations
             .get(entity.uindex())
             .expect(format!("could not get generation for {}", entity).as_ref());
+            
+        use std::cmp::Ordering;
         match generation.cmp(stored_generation) {
-            std::cmp::Ordering::Less => {
-                false
-            }
-            std::cmp::Ordering::Equal => {
-                true
-            }
-            std::cmp::Ordering::Greater => {
-                panic!("Stored generation {} greater than entity generation {} for entity {}", stored_generation, generation, entity);
-            }
+            Ordering::Less => false,
+            Ordering::Equal => true,
+            Ordering::Greater => panic!(
+                "Stored generation {} greater than entity generation {} for entity {}",
+                stored_generation, generation, entity
+            ),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{World, spawn};
+    use crate::{spawn, World};
 
     use super::*;
 
