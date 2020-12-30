@@ -73,12 +73,9 @@ impl<'a> EntityBuilder<'a> {
 
         let layout = std::alloc::Layout::from_size_align(cap, 1).unwrap();
         let data = unsafe { alloc(layout) };
-        if data.is_null() {
-            handle_alloc_error(layout);
-        }
 
         Self {
-            data: NonNull::new(data).unwrap(),
+            data: NonNull::new(data).unwrap_or_else(|| handle_alloc_error(layout)),
             cap,
             len: 0,
 
@@ -103,14 +100,9 @@ impl<'a> EntityBuilder<'a> {
         if self.cap == 0 {
             self.cap = new_size;
             let layout = std::alloc::Layout::from_size_align(self.cap, 1).unwrap();
-
             let new_ptr = unsafe { alloc(layout) };
 
-            if new_ptr.is_null() {
-                handle_alloc_error(layout);
-            }
-
-            self.data = NonNull::new(new_ptr).unwrap();
+            self.data = NonNull::new(new_ptr).unwrap_or_else(|| handle_alloc_error(layout));
         } else {
             let layout = std::alloc::Layout::from_size_align(self.cap, 1).unwrap();
             let new_ptr = unsafe {
@@ -121,14 +113,9 @@ impl<'a> EntityBuilder<'a> {
                     new_size,
                 )
             };
-
-            // if realloc returns null, reallocation failed, but the old pointer is still valid
-            if new_ptr.is_null() {
-                handle_alloc_error(layout);
-            }
+            self.data = NonNull::new(new_ptr).unwrap_or_else(|| handle_alloc_error(layout));
 
             self.cap = new_size;
-            self.data = NonNull::new(new_ptr).unwrap();
         }
     }
 
