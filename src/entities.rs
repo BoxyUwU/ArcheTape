@@ -77,12 +77,12 @@ impl Entities {
 
     pub fn is_alive(&self, entity: EcsId) -> bool {
         let stored_generation = self
-        .generations
-        .get(entity.uindex())
-        .expect(format!("could not get generation for {}", entity).as_ref());
-        
+            .generations
+            .get(entity.uindex())
+            .expect(format!("could not get generation for {}", entity).as_ref());
+
         let generation = entity.generation();
-        
+
         use std::cmp::Ordering;
         match generation.cmp(stored_generation) {
             Ordering::Less => false,

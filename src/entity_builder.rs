@@ -1,4 +1,4 @@
-use std::{alloc::Layout, mem, ptr::NonNull};
+use std::{alloc::Layout, ptr::NonNull};
 use std::{
     alloc::{alloc, dealloc, handle_alloc_error, realloc},
     collections::HashMap,
@@ -101,7 +101,7 @@ impl<'a> EntityBuilder<'a> {
         if self.cap == 0 {
             let layout = std::alloc::Layout::from_size_align(new_size, 1).unwrap();
             let new_ptr = unsafe { alloc(layout) };
-            
+
             self.data = NonNull::new(new_ptr).unwrap_or_else(|| handle_alloc_error(layout));
             self.cap = new_size;
         } else {
