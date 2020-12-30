@@ -97,6 +97,8 @@ impl Entities {
 
 #[cfg(test)]
 mod tests {
+    use crate::{World, spawn};
+
     use super::*;
 
     #[test]
@@ -146,7 +148,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "(gen 4294967295, index 4294967295) is not a valid EcsId")]
+    #[should_panic(expected = "could not get generation for (gen 4294967295, index 4294967295)")]
     pub fn despawn_invalid() {
         let entities = Entities::new();
         let invalid_id = EcsId(u64::MAX);
@@ -249,5 +251,14 @@ mod tests {
         assert!(entities.generations.len() == 1);
         assert!(*entities.generations.get(0).unwrap() == 0);
         assert!(entities.despawned.len() == 0);
+    }
+
+    #[test]
+    pub fn build_with_zst() -> () {
+        struct Zero;
+
+        let mut world = World::new();
+        let entity = spawn!(&mut world, Zero);
+        assert!(world.is_alive(entity));
     }
 }

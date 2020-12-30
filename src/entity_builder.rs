@@ -1,6 +1,6 @@
-use std::ptr::NonNull;
+use std::{alloc::Layout, ptr::NonNull};
 use std::{
-    alloc::{alloc, dealloc, realloc, handle_alloc_error},
+    alloc::{alloc, dealloc, handle_alloc_error, realloc},
     collections::HashMap,
     mem::{ManuallyDrop, MaybeUninit},
 };
@@ -27,38 +27,29 @@ pub struct EntityBuilder<'a> {
 
 impl<'a> Drop for EntityBuilder<'a> {
     fn drop(&mut self) {
-        unsafe {
-            dealloc(
-                self.data.as_ptr(),
-                // Safe as long as cap != 0, which should never happen
-                std::alloc::Layout::from_size_align(self.cap, 1).unwrap(),
-            )
-        };
-        self.len = 0;
-        self.cap = 0;
+        // If it never allocated, don't drop
+        // self.data will never be null if capacity is non-zero
+        if self.cap != 0 {
+            unsafe {
+                dealloc(
+                    self.data.as_ptr(),
+                    // Safe as long as cap != 0, which should never happen
+                    Layout::from_size_align(self.cap, 1).unwrap(),
+                )
+            };
+            self.len = 0;
+            self.cap = 0;
+        }
     }
 }
 
 impl<'a> EntityBuilder<'a> {
     pub(crate) fn new(world: &'a mut World, entity: EcsId, component_meta: ComponentMeta) -> Self {
-        let cap = std::mem::size_of::<EcsId>();
-        assert!(cap != 0, "EcsId zero size, this should never happen!!");
-
-        let data = unsafe {
-            // Any non-zero size with 1 align is safe
-            let layout = std::alloc::Layout::from_size_align(cap, 1).unwrap();
-            let ptr = alloc(layout);
-            if ptr.is_null() {
-                handle_alloc_error(layout);
-            }
-
-            NonNull::new_unchecked(ptr)
-        };
-
         Self {
-            data,
+            data: NonNull::dangling(),
+            cap: 0,
             len: 0,
-            cap,
+
             comp_ids: Vec::with_capacity(8),
 
             entity,
@@ -80,21 +71,17 @@ impl<'a> EntityBuilder<'a> {
             return Self::new(world, entity, component_meta);
         }
 
-        let data = unsafe {
-            // Any non-zero size with 1 align is safe
-            let layout = std::alloc::Layout::from_size_align(cap, 1).unwrap();
-            let ptr = alloc(layout);
-            if ptr.is_null() {
-                handle_alloc_error(layout);
-            }
-
-            NonNull::new_unchecked(ptr)
-        };
+        let layout = std::alloc::Layout::from_size_align(cap, 1).unwrap();
+        let data = unsafe { alloc(layout) };
+        if data.is_null() {
+            handle_alloc_error(layout);
+        }
 
         Self {
-            data,
-            len: 0,
+            data: NonNull::new(data).unwrap(),
             cap,
+            len: 0,
+
             comp_ids: Vec::with_capacity(cap / 8),
 
             entity,
@@ -107,27 +94,42 @@ impl<'a> EntityBuilder<'a> {
     }
 
     fn realloc(&mut self, new_size: usize) {
-        assert!(new_size < isize::MAX as usize, "Cannot allocate more than isize::MAX bytes");
+        assert!(
+            new_size < isize::MAX as usize,
+            "Cannot allocate more than isize::MAX bytes"
+        );
         assert!(new_size > 0, "Cannot reallocate a capacity of zero");
 
-        unsafe {
-            // Safe as long as cap != 0, which should never happen
+        if self.cap == 0 {
+            self.cap = new_size;
             let layout = std::alloc::Layout::from_size_align(self.cap, 1).unwrap();
-            let new_ptr = realloc(
-                self.data.as_ptr(),
-                layout,
-                new_size,
-            );
+
+            let new_ptr = unsafe { alloc(layout) };
+
+            if new_ptr.is_null() {
+                handle_alloc_error(layout);
+            }
+
+            self.data = NonNull::new(new_ptr).unwrap();
+        } else {
+            let layout = std::alloc::Layout::from_size_align(self.cap, 1).unwrap();
+            let new_ptr = unsafe {
+                realloc(
+                    // self.data will never be null here
+                    self.data.as_ptr(),
+                    layout,
+                    new_size,
+                )
+            };
 
             // if realloc returns null, reallocation failed, but the old pointer is still valid
             if new_ptr.is_null() {
                 handle_alloc_error(layout);
-            } else {
-                self.data = NonNull::new_unchecked(new_ptr);
             }
-        }
 
-        self.cap = new_size;
+            self.cap = new_size;
+            self.data = NonNull::new(new_ptr).unwrap();
+        }
     }
 
     /// Adds an entity as a dataless component
@@ -296,7 +298,9 @@ impl<'a> EntityBuilder<'a> {
         );
         for (n, &id) in self.comp_ids.iter().enumerate() {
             // Don't insert the same component type twice
-            lookup.insert(id, n).expect_none("Component type already added");
+            lookup
+                .insert(id, n)
+                .expect_none("Component type already added");
         }
 
         assert!(self
