@@ -76,11 +76,22 @@ impl Entities {
     }
 
     pub fn is_alive(&self, entity: EcsId) -> bool {
-        *self
+        let generation = entity.generation();
+        let stored_generation = self
             .generations
             .get(entity.uindex())
-            .expect(format!("{} is not a valid EcsId", entity).as_ref())
-            == entity.generation()
+            .expect(format!("could not get generation for {}", entity).as_ref());
+        match generation.cmp(stored_generation) {
+            std::cmp::Ordering::Less => {
+                false
+            }
+            std::cmp::Ordering::Equal => {
+                true
+            }
+            std::cmp::Ordering::Greater => {
+                panic!("Stored generation {} greater than entity generation {} for entity {}", stored_generation, generation, entity);
+            }
+        }
     }
 }
 
