@@ -1,4 +1,4 @@
-use std::{alloc::Layout, ptr::NonNull};
+use std::{alloc::Layout, mem, ptr::NonNull};
 use std::{
     alloc::{alloc, dealloc, handle_alloc_error, realloc},
     collections::HashMap,
@@ -72,14 +72,15 @@ impl<'a> EntityBuilder<'a> {
         }
 
         let layout = std::alloc::Layout::from_size_align(cap, 1).unwrap();
-        let data = unsafe { alloc(layout) };
+        let ptr = unsafe { alloc(layout) };
+        let data = NonNull::new(ptr).unwrap_or_else(|| handle_alloc_error(layout));
 
         Self {
-            data: NonNull::new(data).unwrap_or_else(|| handle_alloc_error(layout)),
+            data,
             cap,
             len: 0,
 
-            comp_ids: Vec::with_capacity(cap / 8),
+            comp_ids: Vec::with_capacity(8),
 
             entity,
             component_meta,
@@ -98,11 +99,11 @@ impl<'a> EntityBuilder<'a> {
         assert!(new_size > 0, "Cannot reallocate a capacity of zero");
 
         if self.cap == 0 {
-            self.cap = new_size;
-            let layout = std::alloc::Layout::from_size_align(self.cap, 1).unwrap();
+            let layout = std::alloc::Layout::from_size_align(new_size, 1).unwrap();
             let new_ptr = unsafe { alloc(layout) };
-
+            
             self.data = NonNull::new(new_ptr).unwrap_or_else(|| handle_alloc_error(layout));
+            self.cap = new_size;
         } else {
             let layout = std::alloc::Layout::from_size_align(self.cap, 1).unwrap();
             let new_ptr = unsafe {
