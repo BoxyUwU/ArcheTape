@@ -1,6 +1,6 @@
-use std::{alloc::Layout, ptr::NonNull};
+use std::ptr::NonNull;
 use std::{
-    alloc::{alloc, dealloc, handle_alloc_error, realloc},
+    alloc::{alloc, dealloc, handle_alloc_error, realloc, Layout},
     collections::HashMap,
     mem::{ManuallyDrop, MaybeUninit},
 };
@@ -28,12 +28,14 @@ pub struct EntityBuilder<'a> {
 impl<'a> Drop for EntityBuilder<'a> {
     fn drop(&mut self) {
         // If it never allocated, don't drop
-        // self.data will never be null if capacity is non-zero
         if self.cap != 0 {
+            // We only ever use the global allocator for `self.data`
+            // The size of the memory currently allocated is always kept in sync with self.cap
+            // The size of the memory must also be non-zero, which is checked above
+            // The align is always 1
             unsafe {
                 dealloc(
                     self.data.as_ptr(),
-                    // Safe as long as cap != 0, which should never happen
                     Layout::from_size_align(self.cap, 1).unwrap(),
                 )
             };
@@ -71,7 +73,8 @@ impl<'a> EntityBuilder<'a> {
             return Self::new(world, entity, component_meta);
         }
 
-        let layout = std::alloc::Layout::from_size_align(cap, 1).unwrap();
+        let layout = Layout::from_size_align(cap, 1).unwrap();
+        // Safe because layout size 0 is handed without allocating
         let ptr = unsafe { alloc(layout) };
         let data = NonNull::new(ptr).unwrap_or_else(|| handle_alloc_error(layout));
 
@@ -96,24 +99,21 @@ impl<'a> EntityBuilder<'a> {
             new_size < isize::MAX as usize,
             "Cannot allocate more than isize::MAX bytes"
         );
-        assert!(new_size > 0, "Cannot reallocate a capacity of zero");
+        assert!(new_size > 0, "Cannot reallocate to a capacity of zero");
 
         if self.cap == 0 {
-            let layout = std::alloc::Layout::from_size_align(new_size, 1).unwrap();
+            let layout = Layout::from_size_align(new_size, 1).unwrap();
+            // Safe because new_size is asserted to be greater than zero
             let new_ptr = unsafe { alloc(layout) };
-
             self.data = NonNull::new(new_ptr).unwrap_or_else(|| handle_alloc_error(layout));
+
             self.cap = new_size;
         } else {
-            let layout = std::alloc::Layout::from_size_align(self.cap, 1).unwrap();
-            let new_ptr = unsafe {
-                realloc(
-                    // self.data will never be null here
-                    self.data.as_ptr(),
-                    layout,
-                    new_size,
-                )
-            };
+            let layout = Layout::from_size_align(self.cap, 1).unwrap();
+            // self.data is always allocated using the global allocator
+            // Layout is always the same layout because cap is kept in sync and always > 0 here
+            // new_size is asserted to be greater than 0
+            let new_ptr = unsafe { realloc(self.data.as_ptr(), layout, new_size) };
             self.data = NonNull::new(new_ptr).unwrap_or_else(|| handle_alloc_error(layout));
 
             self.cap = new_size;
