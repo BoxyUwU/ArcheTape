@@ -1,6 +1,6 @@
 use std::ptr::NonNull;
 use std::{
-    alloc::{alloc, dealloc, realloc},
+    alloc::{alloc, dealloc, handle_alloc_error, realloc, Layout},
     collections::HashMap,
     mem::{ManuallyDrop, MaybeUninit},
 };
@@ -27,30 +27,31 @@ pub struct EntityBuilder<'a> {
 
 impl<'a> Drop for EntityBuilder<'a> {
     fn drop(&mut self) {
-        unsafe {
-            dealloc(
-                self.data.as_ptr(),
-                std::alloc::Layout::from_size_align(self.cap, 1).unwrap(),
-            )
-        };
-        self.len = 0;
-        self.cap = 0;
+        // If it never allocated, don't drop
+        if self.cap != 0 {
+            // We only ever use the global allocator for `self.data`
+            // The size of the memory currently allocated is always kept in sync with self.cap
+            // The size of the memory must also be non-zero, which is checked above
+            // The align is always 1
+            unsafe {
+                dealloc(
+                    self.data.as_ptr(),
+                    Layout::from_size_align(self.cap, 1).unwrap(),
+                )
+            };
+            self.len = 0;
+            self.cap = 0;
+        }
     }
 }
 
 impl<'a> EntityBuilder<'a> {
     pub(crate) fn new(world: &'a mut World, entity: EcsId, component_meta: ComponentMeta) -> Self {
-        let cap = std::mem::size_of::<EcsId>();
-        assert!(cap != 0);
-
-        let data =
-            NonNull::new(unsafe { alloc(std::alloc::Layout::from_size_align(cap, 1).unwrap()) })
-                .unwrap();
-
         Self {
-            data,
+            data: NonNull::dangling(),
+            cap: 0,
             len: 0,
-            cap,
+
             comp_ids: Vec::with_capacity(8),
 
             entity,
@@ -72,15 +73,17 @@ impl<'a> EntityBuilder<'a> {
             return Self::new(world, entity, component_meta);
         }
 
-        let data =
-            NonNull::new(unsafe { alloc(std::alloc::Layout::from_size_align(cap, 1).unwrap()) })
-                .expect("Failed to allocate for EntityBuilder");
+        let layout = Layout::from_size_align(cap, 1).unwrap();
+        // Safe because layout size 0 is handed without allocating
+        let ptr = unsafe { alloc(layout) };
+        let data = NonNull::new(ptr).unwrap_or_else(|| handle_alloc_error(layout));
 
         Self {
             data,
-            len: 0,
             cap,
-            comp_ids: Vec::with_capacity(cap / 8),
+            len: 0,
+
+            comp_ids: Vec::with_capacity(8),
 
             entity,
             component_meta,
@@ -92,18 +95,29 @@ impl<'a> EntityBuilder<'a> {
     }
 
     fn realloc(&mut self, new_size: usize) {
-        assert!(new_size < isize::MAX as usize);
+        assert!(
+            new_size < isize::MAX as usize,
+            "Cannot allocate more than isize::MAX bytes"
+        );
+        assert!(new_size > 0, "Cannot reallocate to a capacity of zero");
 
-        let new_ptr = unsafe {
-            realloc(
-                self.data.as_ptr(),
-                std::alloc::Layout::from_size_align(self.cap, 1).unwrap(),
-                new_size,
-            )
-        };
+        if self.cap == 0 {
+            let layout = Layout::from_size_align(new_size, 1).unwrap();
+            // Safe because new_size is asserted to be greater than zero
+            let new_ptr = unsafe { alloc(layout) };
+            self.data = NonNull::new(new_ptr).unwrap_or_else(|| handle_alloc_error(layout));
 
-        self.data = NonNull::new(new_ptr).unwrap();
-        self.cap = new_size;
+            self.cap = new_size;
+        } else {
+            let layout = Layout::from_size_align(self.cap, 1).unwrap();
+            // self.data is always allocated using the global allocator
+            // Layout is always the same layout because cap is kept in sync and always > 0 here
+            // new_size is asserted to be greater than 0
+            let new_ptr = unsafe { realloc(self.data.as_ptr(), layout, new_size) };
+            self.data = NonNull::new(new_ptr).unwrap_or_else(|| handle_alloc_error(layout));
+
+            self.cap = new_size;
+        }
     }
 
     /// Adds an entity as a dataless component

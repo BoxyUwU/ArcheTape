@@ -1,5 +1,5 @@
 use std::{
-    alloc::{alloc, dealloc, realloc, Layout},
+    alloc::{alloc, dealloc, handle_alloc_error, realloc, Layout},
     mem::MaybeUninit,
     ptr::NonNull,
 };
@@ -78,30 +78,27 @@ impl UntypedVec {
 
         if self.cap == 0 {
             let new_cap = self.type_info.layout.size() * 4;
-            let layout = Layout::from_size_align(new_cap, self.type_info.layout.align()).unwrap();
 
-            // Safe because we assert size is not 0
-            let ptr: *mut u8 = unsafe { alloc(layout) };
-            let ptr = NonNull::new(ptr).unwrap();
+            let layout = Layout::from_size_align(new_cap, self.type_info.layout.align()).unwrap();
+            // Safe because type info size is always non-zero and thus new_cap is always non-zero
+            let ptr = unsafe { alloc(layout) };
+            self.data = NonNull::new(ptr).unwrap_or_else(|| handle_alloc_error(layout));
 
             self.cap = new_cap;
-            self.data = ptr;
         } else {
             let new_cap = self.cap * 2;
             assert!(new_cap < isize::MAX as usize);
             let old_layout =
                 Layout::from_size_align(self.cap, self.type_info.layout.align()).unwrap();
 
-            // Safe because we assert size is not 0
             // Safe because the pointer we pass in is always made from this allocator because
             // the only way to get a cap > 0 is if the other branch has run and allocated memory
+            // the layout is also safe because cap is always greater than zero here
             // Safe because new_cap is < isize::MAX
-            let ptr = self.data.as_ptr();
-            let ptr: *mut u8 = unsafe { realloc(ptr, old_layout, new_cap) };
-            let ptr = NonNull::new(ptr).unwrap();
+            let ptr = unsafe { realloc(self.data.as_ptr(), old_layout, new_cap) };
+            self.data = NonNull::new(ptr).unwrap_or_else(|| handle_alloc_error(old_layout));
 
             self.cap = new_cap;
-            self.data = ptr;
         }
     }
 
