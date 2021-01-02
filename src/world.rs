@@ -270,7 +270,6 @@ impl ComponentMeta {
 pub struct World {
     pub(crate) archetypes: Vec<Archetype>,
     entities: Entities,
-    cache: Vec<(Vec<EcsId>, usize)>,
 
     ecs_id_meta: Vec<Option<EntityMeta>>,
     pub(crate) type_id_to_ecs_id: HashMap<TypeId, EcsId, crate::utils::TypeIdHasherBuilder>,
@@ -284,7 +283,6 @@ impl World {
         Self {
             archetypes: Vec::new(),
             entities: Entities::new(),
-            cache: Vec::with_capacity(8),
 
             ecs_id_meta: Vec::with_capacity(32),
             type_id_to_ecs_id: HashMap::with_capacity_and_hasher(
@@ -467,25 +465,13 @@ impl World {
     }
 
     pub fn find_archetype_dynamic(&mut self, comp_ids: &[EcsId]) -> Option<ArchIndex> {
-        for (cached_comp_id, archetype) in self.cache.iter() {
-            if *cached_comp_id == comp_ids {
-                return Some(*archetype).map(ArchIndex);
-            }
-        }
-
-        let position = self.archetypes.iter().position(|archetype| {
-            archetype.comp_ids.len() == comp_ids.len()
-                && comp_ids.iter().all(|id| archetype.comp_ids.contains(id))
-        });
-
-        if let Some(position) = position {
-            if self.cache.len() > 8 {
-                self.cache.pop();
-            }
-            self.cache.insert(0, (Vec::from(comp_ids), position));
-        }
-
-        position.map(ArchIndex)
+        self.archetypes
+            .iter()
+            .position(|archetype| {
+                archetype.comp_ids.len() == comp_ids.len()
+                    && comp_ids.iter().all(|id| archetype.comp_ids.contains(id))
+            })
+            .map(ArchIndex)
     }
 
     pub fn find_archetype_dynamic_plus_id(
