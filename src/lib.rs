@@ -1,4 +1,4 @@
-#![feature(unsafe_block_in_unsafe_fn)]
+#![feature(unsafe_block_in_unsafe_fn, exact_size_is_empty)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 pub mod entities;

@@ -164,7 +164,7 @@ macro_rules! impl_query_infos {
             #[allow(non_snake_case)]
             #[inline(always)]
             fn next(&mut self) -> Option<Self::Returns> {
-                if self.0.len() == 0 {
+                if self.0.is_empty() {
                     return None;
                 } else {
                     let ($($x,)*) = self;
