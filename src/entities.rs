@@ -1,10 +1,8 @@
-use std::fmt::Display;
-
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct EcsId(u64);
 
-impl Display for EcsId {
+impl std::fmt::Display for EcsId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(gen {}, index {})", self.generation(), self.index())
     }
@@ -56,7 +54,7 @@ impl Entities {
         };
 
         if idx > u32::MAX as usize {
-            todo!("Handle out of generations");
+            todo!("Handle running out of entity ids");
         }
 
         let generation = self.generations[idx];
@@ -81,9 +79,9 @@ impl Entities {
             .get(entity.uindex())
             .expect(format!("could not get generation for {}", entity).as_ref());
 
-        let generation = entity.generation();
-
         use std::cmp::Ordering;
+
+        let generation = entity.generation();
         match generation.cmp(stored_generation) {
             Ordering::Less => false,
             Ordering::Equal => true,
