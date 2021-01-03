@@ -6,6 +6,17 @@ pub struct EcsIdIndex(u32);
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct EcsId(EcsIdGen, EcsIdIndex);
 
+impl std::fmt::Debug for EcsId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "(generation: {:#010X}, index {:#010X})",
+            self.generation(),
+            self.index()
+        )
+    }
+}
+
 impl std::fmt::Display for EcsId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(gen {}, index {})", self.generation().0, self.index().0)
