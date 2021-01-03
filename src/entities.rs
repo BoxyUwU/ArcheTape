@@ -1,38 +1,54 @@
-#[allow(non_camel_case_types)]
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct EcsId(u64);
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct EcsIdGen(u32);
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct EcsIdIndex(u32);
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct EcsId(EcsIdGen, EcsIdIndex);
 
 impl std::fmt::Display for EcsId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(gen {}, index {})", self.generation(), self.index())
+        write!(f, "(gen {}, index {})", self.generation().0, self.index().0)
+    }
+}
+
+impl std::hash::Hash for EcsId {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        u64::hash(&self.as_u64(), state)
     }
 }
 
 impl EcsId {
-    // Upper 32 bits
-    const GENERATION_MASK: u64 = !Self::INDEX_MASK;
-    // Lower 32 bits
-    const INDEX_MASK: u64 = u64::MAX >> 32;
-
-    pub fn generation(&self) -> u32 {
-        ((self.0 & Self::GENERATION_MASK) >> 32) as u32
+    pub fn generation(&self) -> EcsIdGen {
+        self.0
     }
 
-    pub fn index(&self) -> u32 {
-        (self.0 & Self::INDEX_MASK) as u32
+    pub fn index(&self) -> EcsIdIndex {
+        self.1
     }
 
     pub fn uindex(&self) -> usize {
-        (self.0 & Self::INDEX_MASK) as usize
+        self.index().0 as usize
     }
 
     pub(crate) fn new(index: u32, generation: u32) -> EcsId {
-        EcsId(index as u64 | ((generation as u64) << 32))
+        Self(EcsIdGen(generation), EcsIdIndex(index))
+    }
+
+    pub fn as_u64(&self) -> u64 {
+        let gen = self.generation().0;
+        let gen = { gen as u64 } << 32;
+
+        let idx = self.index().0 as u64;
+
+        gen | idx
     }
 }
 
 pub struct Entities {
-    pub(crate) generations: Vec<u32>,
+    /// the bool is whether the entity is alive
+    /// the u32 is the generation of the entity
+    pub(crate) generations: Vec<(bool, u32)>,
     pub(crate) despawned: Vec<usize>,
 }
 
@@ -48,7 +64,7 @@ impl Entities {
         let idx = match self.despawned.pop() {
             Some(idx) => idx,
             None => {
-                self.generations.push(0);
+                self.generations.push((true, 0));
                 self.generations.len() - 1
             }
         };
@@ -57,16 +73,16 @@ impl Entities {
             todo!("Handle running out of entity ids");
         }
 
-        let generation = self.generations[idx];
-        EcsId::new(idx as u32, generation)
+        let (_, gen) = self.generations[idx];
+        EcsId::new(idx as u32, gen)
     }
 
     /// Returns true if entity was despawned
     pub fn despawn(&mut self, to_despawn: EcsId) -> bool {
         if self.is_alive(to_despawn) {
-            let generation = &mut self.generations[to_despawn.uindex()];
+            let (_, generation) = &mut self.generations[to_despawn.uindex()];
             *generation = generation.wrapping_add(1);
-            self.despawned.push(to_despawn.index() as usize);
+            self.despawned.push(to_despawn.uindex());
             true
         } else {
             false
@@ -74,14 +90,15 @@ impl Entities {
     }
 
     pub fn is_alive(&self, entity: EcsId) -> bool {
-        let stored_generation = self
+        let (_, stored_generation) = self
             .generations
             .get(entity.uindex())
             .expect(format!("could not get generation for {}", entity).as_ref());
 
         use std::cmp::Ordering;
 
-        let generation = entity.generation();
+        let generation = entity.generation().0;
+        dbg!(stored_generation, generation);
         match generation.cmp(stored_generation) {
             Ordering::Less => false,
             Ordering::Equal => true,
@@ -103,7 +120,7 @@ mod tests {
     pub fn spawn_one() {
         let mut entities = Entities::new();
 
-        assert_eq!(EcsId(0), entities.spawn());
+        assert_eq!(EcsId(EcsIdGen(0), EcsIdIndex(0)), entities.spawn());
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 1);
     }
@@ -112,19 +129,19 @@ mod tests {
     pub fn spawn_multiple() {
         let mut entities = Entities::new();
 
-        assert_eq!(EcsId(0), entities.spawn());
+        assert_eq!(EcsId(EcsIdGen(0), EcsIdIndex(0)), entities.spawn());
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 1);
 
-        assert_eq!(EcsId(1), entities.spawn());
+        assert_eq!(EcsId(EcsIdGen(0), EcsIdIndex(1)), entities.spawn());
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 2);
 
-        assert_eq!(EcsId(2), entities.spawn());
+        assert_eq!(EcsId(EcsIdGen(0), EcsIdIndex(2)), entities.spawn());
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 3);
 
-        assert_eq!(EcsId(3), entities.spawn());
+        assert_eq!(EcsId(EcsIdGen(0), EcsIdIndex(3)), entities.spawn());
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 4);
     }
@@ -134,14 +151,14 @@ mod tests {
         let mut entities = Entities::new();
 
         let entity = entities.spawn();
-        assert_eq!(EcsId(0), entity);
+        assert_eq!(EcsId(EcsIdGen(0), EcsIdIndex(0)), entity);
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 1);
 
         entities.despawn(entity);
         assert!(entities.despawned.len() == 1);
         assert!(entities.generations.len() == 1);
-        assert!(*entities.generations.get(0).unwrap() == 1);
+        assert!(entities.generations.get(0).unwrap().1 == 1);
         assert!(entities.is_alive(entity) == false);
     }
 
@@ -149,7 +166,7 @@ mod tests {
     #[should_panic(expected = "could not get generation for (gen 4294967295, index 4294967295)")]
     pub fn despawn_invalid() {
         let entities = Entities::new();
-        let invalid_id = EcsId(u64::MAX);
+        let invalid_id = EcsId(EcsIdGen(u32::MAX), EcsIdIndex(u32::MAX));
         let _ = entities.is_alive(invalid_id);
     }
 
@@ -158,14 +175,14 @@ mod tests {
         let mut entities = Entities::new();
 
         let entity = entities.spawn();
-        assert_eq!(EcsId(0), entity);
+        assert_eq!(EcsId(EcsIdGen(0), EcsIdIndex(0)), entity);
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 1);
 
         entities.despawn(entity);
         assert!(entities.despawned.len() == 1);
         assert!(entities.generations.len() == 1);
-        assert!(*entities.generations.get(0).unwrap() == 1);
+        assert!(entities.generations.get(0).unwrap().1 == 1);
         assert!(entities.is_alive(entity) == false);
 
         let entity2 = entities.spawn();
@@ -173,7 +190,7 @@ mod tests {
         assert!(entity != entity2);
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 1);
-        assert!(*entities.generations.get(0).unwrap() == 1);
+        assert!(entities.generations.get(0).unwrap().1 == 1);
         assert!(entities.is_alive(entity) == false);
         assert!(entities.is_alive(entity2) == true);
     }
@@ -188,7 +205,7 @@ mod tests {
         assert!(entities.despawn(entity) == false);
         assert!(entities.despawned.len() == 1);
         assert!(entities.generations.len() == 1);
-        assert!(*entities.generations.get(0).unwrap() == 1);
+        assert!(entities.generations.get(0).unwrap().1 == 1);
         assert!(entities.is_alive(entity) == false);
     }
 
@@ -197,7 +214,7 @@ mod tests {
         let mut entities = Entities::new();
 
         let entity = entities.spawn();
-        assert_eq!(EcsId(0), entity);
+        assert_eq!(EcsId(EcsIdGen(0), EcsIdIndex(0)), entity);
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 1);
 
@@ -206,8 +223,8 @@ mod tests {
         assert!(entity != entity2);
         assert!(entities.despawned.len() == 0);
         assert!(entities.generations.len() == 2);
-        assert!(*entities.generations.get(0).unwrap() == 0);
-        assert!(*entities.generations.get(1).unwrap() == 0);
+        assert!(entities.generations.get(0).unwrap().1 == 0);
+        assert!(entities.generations.get(1).unwrap().1 == 0);
         assert!(entities.is_alive(entity) == true);
         assert!(entities.is_alive(entity2) == true);
 
@@ -215,8 +232,8 @@ mod tests {
         assert!(entities.is_alive(entity) == false);
         assert!(entities.is_alive(entity2) == true);
         assert!(entities.generations.len() == 2);
-        assert!(*entities.generations.get(0).unwrap() == 1);
-        assert!(*entities.generations.get(1).unwrap() == 0);
+        assert!(entities.generations.get(0).unwrap().1 == 1);
+        assert!(entities.generations.get(1).unwrap().1 == 0);
         assert!(entities.despawned.len() == 1);
         assert!(*entities.despawned.get(0).unwrap() == 0);
 
@@ -226,8 +243,8 @@ mod tests {
         assert!(entities.is_alive(entity3) == true);
 
         assert!(entities.generations.len() == 2);
-        assert!(*entities.generations.get(0).unwrap() == 1);
-        assert!(*entities.generations.get(1).unwrap() == 0);
+        assert!(entities.generations.get(0).unwrap().1 == 1);
+        assert!(entities.generations.get(1).unwrap().1 == 0);
 
         assert!(entities.despawned.len() == 0);
     }
@@ -236,7 +253,7 @@ mod tests {
     pub fn generation_wraps() {
         let mut entities = Entities::new();
 
-        entities.generations.push(u32::MAX);
+        entities.generations.push((false, u32::MAX));
         entities.despawned.push(0);
 
         let entity = entities.spawn();
@@ -245,9 +262,9 @@ mod tests {
         let entity = entities.spawn();
 
         assert!(entities.is_alive(entity));
-        assert!(entity == EcsId(0));
+        assert!(entity == EcsId(EcsIdGen(0), EcsIdIndex(0)));
         assert!(entities.generations.len() == 1);
-        assert!(*entities.generations.get(0).unwrap() == 0);
+        assert!(entities.generations.get(0).unwrap().1 == 0);
         assert!(entities.despawned.len() == 0);
     }
 
