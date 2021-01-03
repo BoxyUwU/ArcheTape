@@ -32,7 +32,7 @@ pub struct EcsId(EcsIdGen, EcsIdIndex);
 
 impl std::fmt::Display for EcsId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(gen {}, index {})", self.generation().0, self.index().0)
+        write!(f, "{}, {}", self.generation(), self.index())
     }
 }
 
