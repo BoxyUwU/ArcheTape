@@ -1,27 +1,40 @@
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct EcsIdGen(u32);
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct EcsIdIndex(u32);
+
+impl std::fmt::Debug for EcsIdGen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "EcsId generation: {:#010X}", self.0)
+    }
+}
+
+impl std::fmt::Display for EcsIdGen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Generation {:#010X}", self.0)
+    }
+}
+
+impl std::fmt::Debug for EcsIdIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "EcsId index: {:#010X}", self.0)
+    }
+}
+
+impl std::fmt::Display for EcsIdIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Index {:#010X}", self.0)
+    }
+}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct EcsId(EcsIdGen, EcsIdIndex);
-
-impl std::fmt::Debug for EcsId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "(generation: {:#010X}, index {:#010X})",
-            self.generation(),
-            self.index()
-        )
-    }
-}
 
 impl std::fmt::Display for EcsId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "(generation: {:#010X}, index {:#010X})",
+            "{}, {}",
             self.generation(),
             self.index()
         )
@@ -174,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "could not get generation for (gen 4294967295, index 4294967295)")]
+    #[should_panic(expected = "could not get generation for Generation 0xFFFFFFFF, Index 0xFFFFFFFF")]
     pub fn despawn_invalid() {
         let entities = Entities::new();
         let invalid_id = EcsId(EcsIdGen(u32::MAX), EcsIdIndex(u32::MAX));
