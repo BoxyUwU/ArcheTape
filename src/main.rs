@@ -1,12 +1,24 @@
 use arche_tape::world::World;
 
 fn main() {
-    let mut world = World::new();
+    let mut world1 = World::new();
+    let mut world2 = World::new();
 
-    let e1 = world.spawn().with(10_u32).build();
-    let e2 = world.spawn().build();
+    let e1_w1 = world1.spawn().build();
+    dbg!(e1_w1);
+    world1.despawn(e1_w1);
 
-    world.add_component_dynamic(e1, e2);
+    let e1_w2 = world2.spawn().build();
+    dbg!(e1_w2);
+    world2.despawn(e1_w2);
+    let e2_w2 = world2.spawn().build();
+    dbg!(e2_w2);
 
-    assert!(world.get_component_mut_dynamic(e1, e2).is_some());
+    dbg!(world1.is_alive(e1_w1));
+    dbg!(world1.is_alive(e1_w2));
+    dbg!(world1.is_alive(e2_w2));
+
+    dbg!(world2.is_alive(e1_w1));
+    dbg!(world2.is_alive(e1_w2));
+    dbg!(world2.is_alive(e2_w2));
 }

@@ -1,10 +1,26 @@
 #[allow(non_camel_case_types)]
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct EcsId(u64);
+
+impl std::fmt::Debug for EcsId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "(generation: {:#010X}, index {:#010X})",
+            self.generation(),
+            self.index()
+        )
+    }
+}
 
 impl std::fmt::Display for EcsId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(gen {}, index {})", self.generation(), self.index())
+        write!(
+            f,
+            "(generation: {:#010X}, index {:#010X})",
+            self.generation(),
+            self.index()
+        )
     }
 }
 
