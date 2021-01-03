@@ -62,7 +62,13 @@ impl Entities {
 
     pub fn spawn(&mut self) -> EcsId {
         let idx = match self.despawned.pop() {
-            Some(idx) => idx,
+            Some(idx) => {
+                let (alive, gen) = &mut self.generations[idx];
+                assert!(*alive == false);
+                *gen = gen.wrapping_add(1);
+                *alive = true;
+                idx
+            }
             None => {
                 self.generations.push((true, 0));
                 self.generations.len() - 1
@@ -73,15 +79,15 @@ impl Entities {
             todo!("Handle running out of entity ids");
         }
 
-        let (_, gen) = self.generations[idx];
+        let &mut (_, gen) = &mut self.generations[idx];
         EcsId::new(idx as u32, gen)
     }
 
     /// Returns true if entity was despawned
     pub fn despawn(&mut self, to_despawn: EcsId) -> bool {
         if self.is_alive(to_despawn) {
-            let (_, generation) = &mut self.generations[to_despawn.uindex()];
-            *generation = generation.wrapping_add(1);
+            let (alive, _) = &mut self.generations[to_despawn.uindex()];
+            *alive = false;
             self.despawned.push(to_despawn.uindex());
             true
         } else {
@@ -90,23 +96,12 @@ impl Entities {
     }
 
     pub fn is_alive(&self, entity: EcsId) -> bool {
-        let (_, stored_generation) = self
+        let &(alive, stored_generation) = self
             .generations
             .get(entity.uindex())
             .expect(format!("could not get generation for {}", entity).as_ref());
-
-        use std::cmp::Ordering;
-
         let generation = entity.generation().0;
-        dbg!(stored_generation, generation);
-        match generation.cmp(stored_generation) {
-            Ordering::Less => false,
-            Ordering::Equal => true,
-            Ordering::Greater => panic!(
-                "Stored generation {} greater than entity generation {} for entity {}",
-                stored_generation, generation, entity
-            ),
-        }
+        alive && generation == stored_generation
     }
 }
 
@@ -158,7 +153,7 @@ mod tests {
         entities.despawn(entity);
         assert!(entities.despawned.len() == 1);
         assert!(entities.generations.len() == 1);
-        assert!(entities.generations.get(0).unwrap().1 == 1);
+        assert!(entities.generations.get(0).unwrap().1 == 0);
         assert!(entities.is_alive(entity) == false);
     }
 
@@ -182,7 +177,7 @@ mod tests {
         entities.despawn(entity);
         assert!(entities.despawned.len() == 1);
         assert!(entities.generations.len() == 1);
-        assert!(entities.generations.get(0).unwrap().1 == 1);
+        assert!(entities.generations.get(0).unwrap().1 == 0);
         assert!(entities.is_alive(entity) == false);
 
         let entity2 = entities.spawn();
@@ -205,8 +200,10 @@ mod tests {
         assert!(entities.despawn(entity) == false);
         assert!(entities.despawned.len() == 1);
         assert!(entities.generations.len() == 1);
-        assert!(entities.generations.get(0).unwrap().1 == 1);
+        assert!(entities.generations.get(0).unwrap().1 == 0);
         assert!(entities.is_alive(entity) == false);
+
+        assert!(entities.spawn() == EcsId::new(0, 1));
     }
 
     #[test]
@@ -232,7 +229,7 @@ mod tests {
         assert!(entities.is_alive(entity) == false);
         assert!(entities.is_alive(entity2) == true);
         assert!(entities.generations.len() == 2);
-        assert!(entities.generations.get(0).unwrap().1 == 1);
+        assert!(entities.generations.get(0).unwrap().1 == 0);
         assert!(entities.generations.get(1).unwrap().1 == 0);
         assert!(entities.despawned.len() == 1);
         assert!(*entities.despawned.get(0).unwrap() == 0);
@@ -255,9 +252,6 @@ mod tests {
 
         entities.generations.push((false, u32::MAX));
         entities.despawned.push(0);
-
-        let entity = entities.spawn();
-        entities.despawn(entity);
 
         let entity = entities.spawn();
 
