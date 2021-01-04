@@ -1,0 +1,12 @@
+[package]
+name = "untyped-vec"
+version = "0.1.0"
+authors = ["Ellen Nyan"]
+edition = "2018"
+license = "MIT OR Apache-2.0 OR Zlib"
+repository = "https://github.com/EllenNyan/ArcheTape/tree/main/untyped_vec"
+homepage = "https://github.com/EllenNyan/ArcheTape/tree/main/untyped_vec"
+keywords = ["gamedev"]
+categories = ["game-development", "data-structures"]
+description = "UntypedVec is a reimplementation of std's Vec without the use of generics"
+readme = "README.md"

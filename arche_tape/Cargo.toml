@@ -1,3 +1,8 @@
+[workspace]
+members = [
+    "untyped_vec", "arche-tape"
+]
+
 [package]
 name = "arche-tape"
 version = "0.1.2"
@@ -12,6 +17,7 @@ description = "arche-tape is an archetypal ECS"
 readme = "README.md"
 
 [dependencies]
+untyped-vec = { path = "./untyped_vec" }
 
 [dev-dependencies]
 criterion = "0.3"
