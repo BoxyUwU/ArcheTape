@@ -27,7 +27,7 @@ impl std::fmt::Display for EcsIdIndex {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Copy, Clone, Debug, Ord, PartialOrd)]
 pub struct EcsId(EcsIdGen, EcsIdIndex);
 
 impl std::fmt::Display for EcsId {
@@ -35,6 +35,13 @@ impl std::fmt::Display for EcsId {
         write!(f, "{}, {}", self.generation(), self.index())
     }
 }
+
+impl PartialEq for EcsId {
+    fn eq(&self, other: &EcsId) -> bool {
+        self.as_u64() == other.as_u64()
+    }
+}
+impl Eq for EcsId {}
 
 impl std::hash::Hash for EcsId {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -123,7 +130,7 @@ impl Entities {
         let &(alive, stored_generation) = self
             .generations
             .get(entity.uindex())
-            .expect(format!("could not get generation for {}", entity).as_ref());
+            .unwrap_or_else(|| panic!(format!("could not get generation for {}", entity)));
         let generation = entity.generation().0;
         alive && generation == stored_generation
     }
@@ -182,7 +189,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "could not get generation for Generation 0xFFFFFFFF, Index 0xFFFFFFFF")]
+    #[should_panic(
+        expected = "could not get generation for Generation 0xFFFFFFFF, Index 0xFFFFFFFF"
+    )]
     pub fn despawn_invalid() {
         let entities = Entities::new();
         let invalid_id = EcsId(EcsIdGen(u32::MAX), EcsIdIndex(u32::MAX));

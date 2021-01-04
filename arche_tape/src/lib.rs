@@ -7,7 +7,6 @@ pub mod world;
 
 pub(crate) mod archetype_iter;
 pub(crate) mod array_vec;
-//pub(crate) mod untyped_vec;
 
 #[macro_export]
 macro_rules! spawn {
@@ -54,14 +53,17 @@ pub mod utils {
         idx_2: usize,
         slice: &mut [T],
     ) -> (&mut T, &mut T) {
-        if idx_1 < idx_2 {
-            let (left, right) = slice.split_at_mut(idx_2);
-            (left.get_mut(idx_1).unwrap(), right.first_mut().unwrap())
-        } else if idx_1 > idx_2 {
-            let (left, right) = slice.split_at_mut(idx_1);
-            (right.first_mut().unwrap(), left.get_mut(idx_2).unwrap())
-        } else {
-            panic!()
+        use std::cmp::Ordering;
+        match Ord::cmp(&idx_1, &idx_2) {
+            Ordering::Less => {
+                let (left, right) = slice.split_at_mut(idx_2);
+                (left.get_mut(idx_1).unwrap(), right.first_mut().unwrap())
+            }
+            Ordering::Greater => {
+                let (left, right) = slice.split_at_mut(idx_1);
+                (right.first_mut().unwrap(), left.get_mut(idx_2).unwrap())
+            }
+            Ordering::Equal => panic!(),
         }
     }
 }

@@ -80,7 +80,9 @@ impl Archetype {
         }
     }
 
-    /// Safety, ``with_type_info`` must be valid and correspond to ``with_id``
+    /// # Safety
+    ///
+    ///    ``with_type_info`` must be valid and correspond to ``with_id``
     #[allow(unused_unsafe)]
     pub unsafe fn from_archetype_with(
         from: &mut Archetype,
@@ -209,8 +211,6 @@ pub struct ComponentMeta {
     pub layout: core::alloc::Layout,
     /// Used as a safety check for rust types
     pub type_id: Option<TypeId>,
-    /// Used for debug printing
-    pub name: Option<String>,
 }
 
 fn component_meta_drop_fn<T: 'static>(ptr: *mut core::mem::MaybeUninit<u8>) {
@@ -223,7 +223,6 @@ impl ComponentMeta {
             drop_fn: None,
             layout: core::alloc::Layout::from_size_align(size, align).unwrap(),
             type_id: None,
-            name: None,
         }
     }
 
@@ -233,7 +232,6 @@ impl ComponentMeta {
             drop_fn: Some(component_meta_drop_fn::<T>),
             layout: core::alloc::Layout::new::<T>(),
             type_id: Some(TypeId::of::<T>()),
-            name: Some(core::any::type_name::<T>().to_owned()),
         }
     }
 
@@ -243,7 +241,6 @@ impl ComponentMeta {
             drop_fn: None,
             layout: core::alloc::Layout::new::<()>(),
             type_id: Some(TypeId::of::<()>()),
-            name: Some("No data".to_owned()),
         }
     }
 }
@@ -257,6 +254,12 @@ pub struct World {
 
     pub(crate) lock_lookup: HashMap<EcsId, usize, crate::utils::TypeIdHasherBuilder>,
     pub(crate) locks: Vec<RwLock<()>>,
+}
+
+impl Default for World {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl World {
@@ -378,7 +381,9 @@ impl World {
 
 impl World {
     #[must_use]
-    /// All subsequent uses of this entity as a component must be valid for the given ComponentMeta
+    /// # Safety
+    ///
+    ///    All subsequent uses of this entity as a component must be valid for the given ComponentMeta
     pub unsafe fn spawn_with_component_meta(
         &mut self,
         component_meta: ComponentMeta,
@@ -391,7 +396,7 @@ impl World {
     pub fn get_or_create_type_id_ecsid<T: 'static>(&mut self) -> EcsId {
         let comp_id = self.type_id_to_ecs_id.get(&TypeId::of::<T>());
         if let Some(comp_id) = comp_id {
-            return comp_id.clone();
+            return *comp_id;
         }
 
         let entity = self.spawn().build();
@@ -485,8 +490,10 @@ impl World {
         position
     }
 
-    /// Safety: component_ptr must point to data that matches the component_meta of component_id.
-    /// The data must also not be used after calling this function.
+    /// # Safety
+    ///
+    ///   ``component_ptr`` must point to data that matches the component_meta of component_id.
+    ///   The data must also not be used after calling this function.
     pub unsafe fn add_component_dynamic_with_data(
         &mut self,
         entity: EcsId,
@@ -528,20 +535,23 @@ impl World {
 
                 idx
             })
-            .map(|idx| ArchIndex(idx))
+            .map(ArchIndex)
             .unwrap_or_else(|| {
                 // Create a new archetype
-                if !self.lock_lookup.contains_key(&comp_id) {
-                    self.lock_lookup.insert(comp_id, self.locks.len());
+                use std::collections::hash_map::Entry;
+                let entry = self.lock_lookup.entry(comp_id);
+                if let Entry::Vacant(entry) = entry {
+                    entry.insert(self.locks.len());
                     self.locks.push(RwLock::new(()));
                 }
 
                 let (layout, drop_fn) = {
-                    let meta = self.get_entity_meta(comp_id).unwrap();
-                    (
-                        meta.component_meta.layout.clone(),
-                        meta.component_meta.drop_fn.clone(),
-                    )
+                    let meta = self
+                        .get_entity_meta(comp_id)
+                        .unwrap()
+                        .component_meta
+                        .clone();
+                    (meta.layout, meta.drop_fn)
                 };
 
                 let archetype = unsafe {
@@ -661,7 +671,7 @@ impl World {
 
                 idx
             })
-            .map(|idx| ArchIndex(idx))
+            .map(ArchIndex)
             .unwrap_or_else(|| {
                 // Create a new archetype
                 let archetype = Archetype::from_archetype_without(

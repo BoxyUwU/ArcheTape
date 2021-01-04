@@ -31,7 +31,7 @@ pub struct UntypedVec {
     type_info: TypeInfo,
     data: NonNull<u8>,
     cap: usize, // In bytes
-    len: usize, // In bytes
+    len: usize, // In bytes, if cap is 0 then a len > 0 implies ZST
 }
 
 impl UntypedVec {
@@ -40,10 +40,11 @@ impl UntypedVec {
         unsafe { Self::new_from_raw(from.type_info.clone()) }
     }
 
-    /// Safety: TypeInfo::drop_fn must take a pointer to a MaybeUninit<u8> and call the `Drop` impl of the type that TypeInfo::layout corresponds to.
-    /// If your type doesnt have a Drop trait implementation then this can just be None.
+    /// # Safety
     ///
-    /// Safety: Make sure that the used EcsId corresponds correctly to the provided TypeInfo
+    ///    TypeInfo::drop_fn must take a pointer to a MaybeUninit<u8> and call the `Drop` impl of the type that TypeInfo::layout corresponds to.
+    ///    If your type doesnt have a Drop trait implementation then this can just be None.
+    ///    Make sure that the used EcsId corresponds correctly to the provided TypeInfo
     pub unsafe fn new_from_raw(type_info: TypeInfo) -> Self {
         Self {
             type_info,
@@ -69,6 +70,10 @@ impl UntypedVec {
     /// Length in bytes
     pub fn raw_len(&self) -> usize {
         self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     pub fn realloc(&mut self) {
@@ -102,11 +107,13 @@ impl UntypedVec {
         }
     }
 
-    /// The data at src must not be used after calling this function
+    /// # Safety
     ///
-    /// The data at src should be NonNull, aligned to type_info.layout.align() and should be the size given by type_info.layout.size() provided upon creation
+    ///   The data at src must not be used after calling this function
     ///
-    /// The data must be a valid instance of the type that type_info.id represents
+    ///   The data at src should be NonNull, aligned to type_info.layout.align() and should be the size given by type_info.layout.size() provided upon creation
+    ///
+    ///   The data must be a valid instance of the type that type_info.id represents
     #[allow(unused_unsafe)]
     pub unsafe fn push_raw(&mut self, src: *mut MaybeUninit<u8>) {
         assert!(src.is_null() == false);
@@ -215,7 +222,9 @@ impl UntypedVec {
         }
     }
 
-    /// Safety: The other UntypedVec must be of the same type
+    /// # Safety
+    ///
+    ///  The other UntypedVec must be of the same type
     pub unsafe fn swap_move_element_to_other_vec(
         &mut self,
         other: &mut UntypedVec,
@@ -293,7 +302,9 @@ impl UntypedVec {
         }
     }
 
-    /// Safety: The generic used must be the same as the type used for push_raw and must correspond to the data for the EcsId in TypeInfo
+    /// # Safety
+    ///
+    ///   The generic used must be the same as the type used for push_raw and must correspond to the data for the EcsId in TypeInfo
     #[allow(unused_unsafe)]
     pub unsafe fn as_slice<'a, T: 'static>(&'a self) -> &'a [T] {
         assert!(self.type_info.layout == core::alloc::Layout::new::<T>());
@@ -312,7 +323,9 @@ impl UntypedVec {
         }
     }
 
-    /// Safety: The generic used must be the same as the type used for push_raw and must correspond to the data for the EcsId in TypeInfo
+    /// # Safety
+    ///
+    ///    The generic used must be the same as the type used for push_raw and must correspond to the data for the EcsId in TypeInfo
     #[allow(unused_unsafe)]
     pub unsafe fn as_slice_mut<'a, T: 'static>(&'a mut self) -> &'a mut [T] {
         assert!(self.type_info.layout == core::alloc::Layout::new::<T>());

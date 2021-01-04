@@ -139,9 +139,10 @@ impl<'a> EntityBuilder<'a> {
         self
     }
 
-    /// Safety:
-    ///  data behind ``component`` must not be used again.
-    ///  data behind ``component`` must be a valid instance of the type given by ``component_id``
+    /// # Safety
+    ///
+    ///    data behind ``component`` must not be used again.
+    ///    data behind ``component`` must be a valid instance of the type given by ``component_id``
     pub unsafe fn with_dynamic_with_data(
         mut self,
         component: *mut u8,
@@ -226,10 +227,10 @@ impl<'a> EntityBuilder<'a> {
             self.world.set_entity_meta(self.entity, entity_meta);
         } else {
             for id in &self.comp_ids {
-                if !self.world.lock_lookup.contains_key(id) {
-                    self.world
-                        .lock_lookup
-                        .insert(id.clone(), self.world.locks.len());
+                use std::collections::hash_map::Entry;
+                let entry = self.world.lock_lookup.entry(*id);
+                if let Entry::Vacant(entry) = entry {
+                    entry.insert(self.world.locks.len());
                     self.world.locks.push(std::sync::RwLock::new(()));
                 }
             }

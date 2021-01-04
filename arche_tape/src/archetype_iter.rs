@@ -1,3 +1,5 @@
+#![allow(clippy::eval_order_dependence)]
+
 use super::entities::{EcsId, Entities};
 use super::world::{Archetype, World};
 use std::any::TypeId;
@@ -151,7 +153,7 @@ macro_rules! impl_query_infos {
                         let (len, iter) = $x::iter_from_guard($x);
 
                         // SAFETY, it's important that all iterators are the same length so that we can get_unchecked if the first iterator return Some()
-                        if length.is_none() {
+                        if let None = length {
                             length = Some(len);
                         }
                         assert_eq!(length.unwrap(), len);
@@ -287,7 +289,7 @@ pub unsafe trait Borrow<'b, 'guard: 'b>: Sized + 'static {
         locks: &'guard [RwLock<()>],
     ) -> Self::Lock;
 
-    fn iter_empty<'a>() -> Self::Iter;
+    fn iter_empty() -> Self::Iter;
 
     /// Used to create EcsId's needed for this query.
     fn type_id() -> Option<TypeId>;
@@ -315,7 +317,7 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
     #[allow(unused_unsafe)]
     unsafe fn borrow_from_iter_unchecked(iter: &mut Self::Iter) -> Self::Returns {
         match iter.next() {
-            Some(item) => return item,
+            Some(item) => item,
             _ => unsafe { std::hint::unreachable_unchecked() },
         }
     }
@@ -459,7 +461,6 @@ unsafe impl<'b, 'guard: 'b> Borrow<'b, 'guard> for Entities {
         _: &HashMap<EcsId, usize, crate::utils::TypeIdHasherBuilder>,
         _: &'guard [RwLock<()>],
     ) -> Self::Lock {
-        ()
     }
 
     fn iter_empty<'a>() -> Self::Iter {
