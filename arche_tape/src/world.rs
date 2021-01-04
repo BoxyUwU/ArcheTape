@@ -209,8 +209,6 @@ pub struct InstanceMeta {
 pub struct ComponentMeta {
     pub drop_fn: Option<fn(*mut core::mem::MaybeUninit<u8>)>,
     pub layout: core::alloc::Layout,
-    /// Used as a safety check for rust types
-    pub type_id: Option<TypeId>,
 }
 
 fn component_meta_drop_fn<T: 'static>(ptr: *mut core::mem::MaybeUninit<u8>) {
@@ -222,7 +220,6 @@ impl ComponentMeta {
         Self {
             drop_fn: None,
             layout: core::alloc::Layout::from_size_align(size, align).unwrap(),
-            type_id: None,
         }
     }
 
@@ -231,7 +228,6 @@ impl ComponentMeta {
         Self {
             drop_fn: Some(component_meta_drop_fn::<T>),
             layout: core::alloc::Layout::new::<T>(),
-            type_id: Some(TypeId::of::<T>()),
         }
     }
 
@@ -240,7 +236,6 @@ impl ComponentMeta {
         Self {
             drop_fn: None,
             layout: core::alloc::Layout::new::<()>(),
-            type_id: Some(TypeId::of::<()>()),
         }
     }
 }
@@ -363,9 +358,9 @@ impl World {
             self.get_entity_meta(component_id)
                 .unwrap()
                 .component_meta
-                .type_id
-                .unwrap()
-                == TypeId::of::<()>()
+                .layout
+                .size()
+                == 0
         );
 
         let mut component = core::mem::ManuallyDrop::new(());

@@ -13,8 +13,8 @@ use untyped_vec::{TypeInfo, UntypedVec};
 
 pub struct EntityBuilder<'a> {
     data: NonNull<u8>,
-    len: usize,
     cap: usize,
+    len: usize,
     comp_ids: Vec<EcsId>,
 
     entity: EcsId,
@@ -129,8 +129,9 @@ impl<'a> EntityBuilder<'a> {
                 .get_entity_meta(component_id)
                 .unwrap()
                 .component_meta
-                .type_id
-                == Some(std::any::TypeId::of::<()>())
+                .layout
+                .size()
+                == 0
         );
 
         self.comp_ids.push(component_id);
@@ -182,7 +183,7 @@ impl<'a> EntityBuilder<'a> {
         unsafe { self.with_dynamic_with_data(&mut component as *mut _ as *mut _, component_id) }
     }
 
-    pub fn build(mut self) -> EcsId {
+    pub fn build(&mut self) -> EcsId {
         use crate::world::{ArchIndex, EntityMeta, InstanceMeta};
         if let Some(arch_index) = self.world.find_archetype_dynamic(&self.comp_ids) {
             self.world.archetypes[arch_index.0]
