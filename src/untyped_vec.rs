@@ -4,26 +4,23 @@ use std::{
     ptr::NonNull,
 };
 
-use crate::entities::EcsId;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)] // If we ever add a Hash impl we need to do it manually because of the custom Eq/PartialEq impls
 pub struct TypeInfo {
-    pub comp_id: EcsId,
     pub layout: Layout,
     pub drop_fn: Option<fn(*mut MaybeUninit<u8>)>,
 }
 
+impl PartialEq for TypeInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.layout == other.layout
+    }
+}
+
+impl Eq for TypeInfo {}
+
 impl TypeInfo {
-    pub fn new(
-        comp_id: EcsId,
-        layout: Layout,
-        drop_fn: Option<fn(*mut MaybeUninit<u8>)>,
-    ) -> TypeInfo {
-        Self {
-            comp_id,
-            layout,
-            drop_fn,
-        }
+    pub fn new(layout: Layout, drop_fn: Option<fn(*mut MaybeUninit<u8>)>) -> TypeInfo {
+        Self { layout, drop_fn }
     }
 }
 
@@ -362,7 +359,6 @@ mod tests {
     pub fn untyped_vec_new<T: 'static>() -> UntypedVec {
         unsafe {
             UntypedVec::new_from_raw(TypeInfo::new(
-                EcsId::new(0, 0),
                 Layout::new::<T>(),
                 Some(|ptr| core::ptr::drop_in_place::<T>(ptr as *mut T)),
             ))

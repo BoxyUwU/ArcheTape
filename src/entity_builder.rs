@@ -6,10 +6,10 @@ use std::{
 };
 
 use crate::{
-    untyped_vec::{TypeInfo, UntypedVec},
     world::{AddRemoveCache, Archetype, ComponentMeta},
     EcsId, World,
 };
+use untyped_vec::{TypeInfo, UntypedVec};
 
 pub struct EntityBuilder<'a> {
     data: NonNull<u8>,
@@ -201,6 +201,7 @@ impl<'a> EntityBuilder<'a> {
                 let comp_storage_index = archetype.lookup[&comp_id];
                 unsafe {
                     archetype.component_storages[comp_storage_index]
+                        .1
                         .get_mut()
                         .push_raw(data_ptr.cast());
                     data_ptr = data_ptr.offset(component_meta.layout.size() as isize);
@@ -208,6 +209,7 @@ impl<'a> EntityBuilder<'a> {
 
                 assert!(
                     archetype.component_storages[comp_storage_index]
+                        .1
                         .get_mut()
                         .len()
                         == archetype.entities.len()
@@ -258,27 +260,18 @@ impl<'a> EntityBuilder<'a> {
             let component_meta = &self.world.get_entity_meta(comp_id).unwrap().component_meta;
             let mut untyped_vec = unsafe {
                 UntypedVec::new_from_raw(TypeInfo::new(
-                    comp_id,
                     component_meta.layout,
                     component_meta.drop_fn,
                 ))
             };
             unsafe { untyped_vec.push_raw(data_ptr.cast()) };
-            component_storages.push(std::cell::UnsafeCell::new(untyped_vec));
+            component_storages.push((comp_id, std::cell::UnsafeCell::new(untyped_vec)));
 
             data_ptr = unsafe { data_ptr.offset(component_meta.layout.size() as isize) };
         }
 
         self.comp_ids.sort();
-        component_storages.sort_by(|storage_1, storage_2| {
-            let storage_1 = unsafe { &*storage_1.get() };
-            let storage_2 = unsafe { &*storage_2.get() };
-
-            Ord::cmp(
-                &storage_1.get_type_info().comp_id,
-                &storage_2.get_type_info().comp_id,
-            )
-        });
+        component_storages.sort_by(|(id1, _), (id2, _)| Ord::cmp(&id1, &id2));
 
         let mut lookup = HashMap::with_capacity_and_hasher(
             self.num_components,
@@ -292,15 +285,12 @@ impl<'a> EntityBuilder<'a> {
             );
         }
 
-        assert!(self
-            .comp_ids
-            .iter()
-            .zip(
-                component_storages
-                    .iter()
-                    .map(|storage| unsafe { &*storage.get() })
-            )
-            .all(|(comp_id, storage)| *comp_id == storage.get_type_info().comp_id));
+        assert!(
+            self.comp_ids
+                .iter()
+                .zip(component_storages.iter().map(|(id, _)| id))
+                .all(|(id1, id2)| id1 == id2)
+        );
 
         Archetype {
             entities: vec![self.entity],

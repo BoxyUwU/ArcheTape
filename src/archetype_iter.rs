@@ -1,5 +1,4 @@
 use super::entities::{EcsId, Entities};
-use super::untyped_vec::UntypedVec;
 use super::world::{Archetype, World};
 use std::any::TypeId;
 use std::collections::HashMap;
@@ -7,6 +6,7 @@ use std::marker::PhantomData;
 use std::slice::{Iter, IterMut};
 use std::sync::RwLock;
 use std::sync::{RwLockReadGuard, RwLockWriteGuard};
+use untyped_vec::UntypedVec;
 
 #[derive(Copy, Clone)]
 pub struct Query<'a, T: QueryInfos + 'static> {
@@ -333,7 +333,7 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
         // just cache the indices we need for a query rendering this all moot
         for (n, id) in archetype.comp_ids.iter().enumerate() {
             if id == &comp_id.unwrap() {
-                return unsafe { &*archetype.component_storages[n].get() };
+                return unsafe { &*archetype.component_storages[n].1.get() };
             }
         }
         panic!("Guard not found")
@@ -396,7 +396,7 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
         // just cache the indices we need for a query rendering this all moot
         for (n, id) in archetype.comp_ids.iter().enumerate() {
             if id == &comp_id.unwrap() {
-                return unsafe { &mut *archetype.component_storages[n].get() };
+                return unsafe { &mut *archetype.component_storages[n].1.get() };
             }
         }
         panic!("Guard not found")

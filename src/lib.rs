@@ -7,7 +7,7 @@ pub mod world;
 
 pub(crate) mod archetype_iter;
 pub(crate) mod array_vec;
-pub(crate) mod untyped_vec;
+//pub(crate) mod untyped_vec;
 
 #[macro_export]
 macro_rules! spawn {

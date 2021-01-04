@@ -1,11 +1,11 @@
 use super::archetype_iter::{Query, QueryInfos};
 use super::entities::{EcsId, Entities};
-use super::untyped_vec::UntypedVec;
 use crate::array_vec::ArrayVec;
 use std::any::TypeId;
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::sync::RwLock;
+use untyped_vec::UntypedVec;
 
 const CACHE_SIZE: usize = 4;
 pub struct AddRemoveCache {
@@ -51,7 +51,7 @@ pub struct Archetype {
     /// Component storages are sorted such that lower type_ids are first, this means that when adding/removing components we dont need to
     /// go through the lookup hashmap on the other archetype, we can just zip two iterators over component storages and skip the index
     /// for the removed/added type
-    pub(crate) component_storages: Vec<UnsafeCell<UntypedVec>>,
+    pub(crate) component_storages: Vec<(EcsId, UnsafeCell<UntypedVec>)>, // We need the EcsId here so that we can sort the vec :( the EcsId here should be the same as the one in comp_ids at the same index
 
     /// The order of this vec is guaranteed to be the same as the order of component storages,
     /// this means that you can .iter().position(|id| ...) to find the index in component_storages for an EcsId
@@ -71,9 +71,8 @@ impl Archetype {
                 // Capacity + 1 incase this gets fed into a from_archetype_with call
                 let mut storages = Vec::with_capacity(from.component_storages.len() + 1);
                 for storage in from.component_storages.iter_mut() {
-                    let untyped_vec = UntypedVec::new_from_untyped_vec(storage.get_mut());
-                    let cell = UnsafeCell::new(untyped_vec);
-                    storages.push(cell);
+                    let untyped_vec = UntypedVec::new_from_untyped_vec(storage.1.get_mut());
+                    storages.push((storage.0, UnsafeCell::new(untyped_vec)));
                 }
                 storages
             },
@@ -81,47 +80,36 @@ impl Archetype {
         }
     }
 
-    /// Safety, type_info must be valid
+    /// Safety, ``with_type_info`` must be valid and correspond to ``with_id``
     #[allow(unused_unsafe)]
     pub unsafe fn from_archetype_with(
         from: &mut Archetype,
-        type_info: crate::untyped_vec::TypeInfo,
+        with_type_info: untyped_vec::TypeInfo,
+        with_id: EcsId,
     ) -> Archetype {
         let mut new_archetype = Archetype::from_archetype(from);
 
-        assert!(new_archetype.lookup.get(&type_info.comp_id).is_none());
+        assert!(new_archetype.lookup.get(&with_id).is_none());
 
-        new_archetype.comp_ids.push(type_info.comp_id);
-        new_archetype
-            .component_storages
-            .push(UnsafeCell::new(unsafe {
-                UntypedVec::new_from_raw(type_info)
-            }));
+        new_archetype.comp_ids.push(with_id);
+        new_archetype.component_storages.push((
+            with_id,
+            UnsafeCell::new(unsafe { UntypedVec::new_from_raw(with_type_info) }),
+        ));
 
         // TODO there's no need to sort twice they should have the same ordering
         new_archetype.comp_ids.sort();
         new_archetype
             .component_storages
-            .sort_by(|storage_1, storage_2| {
-                let storage_1 = unsafe { &*storage_1.get() };
-                let storage_2 = unsafe { &*storage_2.get() };
+            .sort_by(|(id1, _), (id2, _)| Ord::cmp(&id1, &id2));
 
-                Ord::cmp(
-                    &storage_1.get_type_info().comp_id,
-                    &storage_2.get_type_info().comp_id,
-                )
-            });
-
-        assert!(new_archetype
-            .comp_ids
-            .iter()
-            .zip(
-                new_archetype
-                    .component_storages
-                    .iter()
-                    .map(|storage| unsafe { &*storage.get() })
-            )
-            .all(|(comp_id, storage)| *comp_id == storage.get_type_info().comp_id));
+        assert!(
+            new_archetype
+                .comp_ids
+                .iter()
+                .zip(new_archetype.component_storages.iter().map(|(id, _)| id))
+                .all(|(id1, id2)| id1 == id2)
+        );
 
         new_archetype.lookup.clear();
         for (n, &id) in new_archetype.comp_ids.iter().enumerate() {
@@ -144,26 +132,15 @@ impl Archetype {
         new_archetype.comp_ids.sort();
         new_archetype
             .component_storages
-            .sort_by(|storage_1, storage_2| {
-                let storage_1 = unsafe { &*storage_1.get() };
-                let storage_2 = unsafe { &*storage_2.get() };
+            .sort_by(|(id_1, _), (id_2, _)| Ord::cmp(&id_1, &id_2));
 
-                Ord::cmp(
-                    &storage_1.get_type_info().comp_id,
-                    &storage_2.get_type_info().comp_id,
-                )
-            });
-
-        assert!(new_archetype
-            .comp_ids
-            .iter()
-            .zip(
-                new_archetype
-                    .component_storages
-                    .iter()
-                    .map(|storage| unsafe { &*storage.get() })
-            )
-            .all(|(comp_id, storage)| *comp_id == storage.get_type_info().comp_id));
+        assert!(
+            new_archetype
+                .comp_ids
+                .iter()
+                .zip(new_archetype.component_storages.iter().map(|(id, _)| id))
+                .all(|(id1, id2)| id1 == id2)
+        );
 
         new_archetype.lookup.clear();
         for (n, &id) in new_archetype.comp_ids.iter().enumerate() {
@@ -181,7 +158,11 @@ impl Archetype {
     ) -> bool {
         assert!(self.entities[entity_idx] == entity);
         self.entities.swap_remove(entity_idx);
-        for storage in self.component_storages.iter_mut().map(UnsafeCell::get_mut) {
+        for storage in self
+            .component_storages
+            .iter_mut()
+            .map(|(_, cell)| cell.get_mut())
+        {
             storage.swap_remove(entity_idx);
         }
         entity_metas[entity.uindex()] = None;
@@ -566,7 +547,8 @@ impl World {
                 let archetype = unsafe {
                     Archetype::from_archetype_with(
                         &mut self.archetypes[current_archetype_idx.0],
-                        crate::untyped_vec::TypeInfo::new(comp_id, layout, drop_fn),
+                        untyped_vec::TypeInfo::new(layout, drop_fn),
+                        comp_id,
                     )
                 };
 
@@ -585,68 +567,52 @@ impl World {
         );
 
         let mut skipped_idx = None;
-        for (current_storage, (_, target_storage)) in current_archetype
-            .component_storages
-            .iter_mut()
-            .map(|current_storage| current_storage.get_mut())
-            .zip(
-                target_archetype
-                    .component_storages
-                    .iter_mut()
-                    .map(|target_storage| target_storage.get_mut())
-                    .enumerate()
-                    .filter(|(n, target_storage)| {
-                        if target_storage.get_type_info().comp_id == comp_id {
-                            assert!(skipped_idx.is_none());
-                            skipped_idx = Some(*n);
-                            false
-                        } else {
-                            true
-                        }
-                    }),
-            )
-        {
-            // Safe because component_storages in archetypes are sorted and we skip the component_storage that isn't the same
-            unsafe { current_storage.swap_move_element_to_other_vec(target_storage, entity_idx) }
-        }
 
-        if skipped_idx.is_none() {
-            assert!(
-                target_archetype
-                    .component_storages
-                    .last_mut()
-                    .unwrap()
-                    .get_mut()
-                    .get_type_info()
-                    .comp_id
-                    == comp_id
-            );
+        Iterator::zip(
+            current_archetype
+                .component_storages
+                .iter_mut()
+                .map(|(_, storage)| storage.get_mut()),
+            target_archetype
+                .component_storages
+                .iter_mut()
+                .enumerate()
+                // Skip the extra storage in this archetype
+                .filter(|(n, (tar_id, _))| {
+                    if *tar_id == comp_id {
+                        assert!(skipped_idx.is_none());
+                        skipped_idx = Some(*n);
+                        return false;
+                    }
+                    true
+                })
+                .map(|(_, (_, storage))| storage.get_mut()),
+        )
+        .for_each(|(cur_storage, tar_storage)| unsafe {
+            // Safe because component_storages in archetypes are sorted and we skip the component_storage that isn't the same
+            cur_storage.swap_move_element_to_other_vec(tar_storage, entity_idx)
+        });
+
+        if let None = skipped_idx {
+            assert!(*target_archetype.comp_ids.last_mut().unwrap() == comp_id);
             skipped_idx = Some(target_archetype.component_storages.len() - 1);
         }
 
         unsafe {
             target_archetype.component_storages[skipped_idx.unwrap()]
+                .1
                 .get_mut()
                 .push_raw(component_ptr as *mut core::mem::MaybeUninit<u8>);
         }
 
         target_archetype.entities.push(entity);
-        {
-            let entity_meta = &mut self.ecs_id_meta[entity.uindex()];
-            let instance_meta = InstanceMeta {
-                archetype: target_archetype_idx,
-                index: target_archetype.entities.len() - 1,
-            };
-            match entity_meta {
-                Some(meta) => meta.instance_meta = instance_meta,
-                None => {
-                    *entity_meta = Some(EntityMeta {
-                        instance_meta,
-                        component_meta: ComponentMeta::unit(),
-                    })
-                }
-            }
-        }
+        self.ecs_id_meta[entity.uindex()]
+            .as_mut()
+            .unwrap()
+            .instance_meta = InstanceMeta {
+            archetype: target_archetype_idx,
+            index: target_archetype.entities.len() - 1,
+        };
 
         current_archetype.entities.swap_remove(entity_idx);
         if let Some(&swapped_entity) = current_archetype.entities.get(entity_idx) {
@@ -718,66 +684,48 @@ impl World {
         );
 
         let mut skipped_storage = None;
-        for ((_, current_storage), target_storage) in current_archetype
-            .component_storages
-            .iter_mut()
-            .map(|current_storage| current_storage.get_mut())
-            .enumerate()
-            .filter(|(n, current_storage)| {
-                if current_storage.get_type_info().comp_id == comp_id {
-                    assert!(skipped_storage.is_none());
-                    skipped_storage = Some(*n);
-                    false
-                } else {
+        Iterator::zip(
+            current_archetype
+                .component_storages
+                .iter_mut()
+                .enumerate()
+                .filter(|(n, (id, _))| {
+                    if *id == comp_id {
+                        assert!(skipped_storage.is_none());
+                        skipped_storage = Some(*n);
+                        return false;
+                    }
                     true
-                }
-            })
-            .zip(
-                target_archetype
-                    .component_storages
-                    .iter_mut()
-                    .map(|target_storage| target_storage.get_mut()),
-            )
-        {
+                })
+                .map(|(_, (_, storage))| storage.get_mut()),
+            target_archetype
+                .component_storages
+                .iter_mut()
+                .map(|(_, storage)| storage.get_mut()),
+        )
+        .for_each(|(cur_storage, tar_storage)| unsafe {
             // Safe because component_storages in archetypes are sorted and we skip the component_storage that isn't the same
-            unsafe { current_storage.swap_move_element_to_other_vec(target_storage, entity_idx) }
-        }
+            cur_storage.swap_move_element_to_other_vec(tar_storage, entity_idx)
+        });
 
         if skipped_storage.is_none() {
-            assert!(
-                current_archetype
-                    .component_storages
-                    .last_mut()
-                    .unwrap()
-                    .get_mut()
-                    .get_type_info()
-                    .comp_id
-                    == comp_id
-            );
+            assert!(*current_archetype.comp_ids.last_mut().unwrap() == comp_id);
             skipped_storage = Some(current_archetype.component_storages.len() - 1);
         }
 
         current_archetype.component_storages[skipped_storage.unwrap()]
+            .1
             .get_mut()
             .swap_remove(entity_idx);
 
         target_archetype.entities.push(entity);
-        {
-            let entity_meta = &mut self.ecs_id_meta[entity.uindex()];
-            let instance_meta = InstanceMeta {
-                archetype: target_archetype_idx,
-                index: target_archetype.entities.len() - 1,
-            };
-            match entity_meta {
-                Some(meta) => meta.instance_meta = instance_meta,
-                None => {
-                    *entity_meta = Some(EntityMeta {
-                        instance_meta,
-                        component_meta: ComponentMeta::unit(),
-                    })
-                }
-            };
-        }
+        self.ecs_id_meta[entity.uindex()]
+            .as_mut()
+            .unwrap()
+            .instance_meta = InstanceMeta {
+            archetype: target_archetype_idx,
+            index: target_archetype.entities.len() - 1,
+        };
 
         current_archetype.entities.swap_remove(entity_idx);
         if let Some(&swapped_entity) = current_archetype.entities.get(entity_idx) {
@@ -810,6 +758,7 @@ impl World {
 
         Some(
             archetype.component_storages[component_storage_idx]
+                .1
                 .get_mut()
                 .get_mut_raw(entity_idx)
                 .unwrap(),
@@ -861,7 +810,7 @@ mod tests {
         // The two component entities
         assert!(world.archetypes[0].entities.len() == 2);
         assert!(world.archetypes[0].component_storages.len() == 0);
-        for lock in world.archetypes[0].component_storages.iter_mut() {
+        for (_, lock) in world.archetypes[0].component_storages.iter_mut() {
             let storage = lock.get_mut();
             assert!(storage.len() == 0);
         }
@@ -869,7 +818,7 @@ mod tests {
         // The first archetype entity was in
         assert!(world.archetypes[1].entities.len() == 0);
         assert!(world.archetypes[1].component_storages.len() == 1);
-        for lock in world.archetypes[1].component_storages.iter_mut() {
+        for (_, lock) in world.archetypes[1].component_storages.iter_mut() {
             let storage = lock.get_mut();
             assert!(storage.len() == 0);
         }
@@ -877,7 +826,7 @@ mod tests {
         // The current archetype entity was in
         assert!(world.archetypes[2].entities.len() == 1);
         assert!(world.archetypes[2].component_storages.len() == 2);
-        for lock in world.archetypes[2].component_storages.iter_mut() {
+        for (_, lock) in world.archetypes[2].component_storages.iter_mut() {
             let storage = lock.get_mut();
             assert!(storage.len() == 1);
         }
@@ -909,15 +858,15 @@ mod tests {
         // Original first entity archetype
         assert!(world.archetypes[1].entities.len() == 0);
         assert!(world.archetypes[1].component_storages.len() == 1);
-        assert!(world.archetypes[1].component_storages[0].get_mut().len() == 0);
+        assert!(world.archetypes[1].component_storages[0].1.get_mut().len() == 0);
 
         // Entity2 + Entity1 Archetpye
         assert!(world.archetypes[2].entities.len() == 2);
         assert!(world.archetypes[2].entities[0] == entity);
         assert!(world.archetypes[2].entities[1] == entity2);
         assert!(world.archetypes[2].component_storages.len() == 2);
-        assert!(world.archetypes[2].component_storages[0].get_mut().len() == 2);
-        assert!(world.archetypes[2].component_storages[1].get_mut().len() == 2);
+        assert!(world.archetypes[2].component_storages[0].1.get_mut().len() == 2);
+        assert!(world.archetypes[2].component_storages[1].1.get_mut().len() == 2);
 
         let entity_meta = world.ecs_id_meta[entity.uindex()].clone().unwrap();
         assert!(entity_meta.instance_meta.archetype.0 == 2);
