@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "arche_tape",
+    "untyped_vec",
+]
+
+[profile.bench]
+opt-level = 3
+codegen-units = 1
+lto = "thin"
+debug = true
+
+[profile.release]
+opt-level = 3
+debug = true

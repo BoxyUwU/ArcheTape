@@ -1,3 +1,6 @@
+#![feature(unsafe_block_in_unsafe_fn)]
+#![deny(unsafe_op_in_unsafe_fn)]
+
 use std::{
     alloc::{alloc, dealloc, handle_alloc_error, realloc, Layout},
     mem::MaybeUninit,
@@ -230,10 +233,9 @@ impl UntypedVec {
             self.len -= 1;
             other.len += 1;
         } else if element == (self.len / self.type_info.layout.size()) - 1 {
-            // Safe because we're offsetting inside the allocation and len is never >= isize::MAX
-            let to_move = unsafe { data.offset((element * self.type_info.layout.size()) as isize) };
-
             unsafe {
+                // Safe because we're offsetting inside the allocation and len is never >= isize::MAX
+                let to_move = data.offset((element * self.type_info.layout.size()) as isize);
                 // Safe because we assert that the type_info for self and other are the same.
                 // Safe because we reduce the length of this vec by one which is effectively mem::forget
                 other.push_raw(to_move);
@@ -241,19 +243,15 @@ impl UntypedVec {
 
             self.len -= self.type_info.layout.size();
         } else {
-            // Safe because we're offsetting inside the allocation and len is never >= isize::MAX
-            let to_move = unsafe { data.offset((element * self.type_info.layout.size()) as isize) };
-            let to_swap = unsafe {
-                data.offset(self.len as isize)
-                    .offset(-(self.type_info.layout.size() as isize))
-            };
-
             unsafe {
+                // Safe because we're offsetting inside the allocation and len is never >= isize::MAX
+                let to_move = data.offset((element * self.type_info.layout.size()) as isize);
+                let to_swap = data
+                    .offset(self.len as isize)
+                    .offset(-(self.type_info.layout.size() as isize));
+
                 // Safe because moving the last entry in the vec happens in the other branch
                 std::ptr::swap_nonoverlapping(to_move, to_swap, self.type_info.layout.size());
-            }
-
-            unsafe {
                 // Safe because we assert that the type_info for self and other are the same.
                 // Safe because we assert that byte_index is aligned to self.type_info.layout.align()
                 // Safe because we reduce the length of this vec by one which means we wont touch the data again
