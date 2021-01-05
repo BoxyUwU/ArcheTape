@@ -29,6 +29,19 @@ impl<'a> Drop for EntityBuilder<'a> {
     fn drop(&mut self) {
         // If it never allocated, don't drop
         if self.cap != 0 {
+            if let None = self.world.entity_builder_reuse {
+                let mut comp_ids = std::mem::replace(&mut self.comp_ids, Vec::new());
+                comp_ids.clear();
+
+                let ptr = std::mem::replace(&mut self.data, NonNull::dangling());
+                let cap = self.cap;
+                self.cap = 0;
+                self.len = 0;
+
+                self.world.entity_builder_reuse = Some((comp_ids, ptr, cap));
+                return;
+            }
+
             // We only ever use the global allocator for `self.data`
             // The size of the memory currently allocated is always kept in sync with self.cap
             // The size of the memory must also be non-zero, which is checked above
@@ -46,7 +59,30 @@ impl<'a> Drop for EntityBuilder<'a> {
 }
 
 impl<'a> EntityBuilder<'a> {
+    pub(crate) fn new_from_world_cache(
+        world: &'a mut World,
+        entity: EcsId,
+        component_meta: ComponentMeta,
+    ) -> Self {
+        let (comp_ids, data, cap) = world.entity_builder_reuse.take().unwrap();
+
+        Self {
+            data,
+            cap,
+            len: 0,
+            comp_ids,
+            component_meta,
+            entity,
+            world,
+            num_components: 0,
+        }
+    }
+
     pub(crate) fn new(world: &'a mut World, entity: EcsId, component_meta: ComponentMeta) -> Self {
+        if let Some(_) = world.entity_builder_reuse {
+            return Self::new_from_world_cache(world, entity, component_meta);
+        }
+
         Self {
             data: NonNull::dangling(),
             cap: 0,
@@ -69,6 +105,10 @@ impl<'a> EntityBuilder<'a> {
         component_meta: ComponentMeta,
         cap: usize,
     ) -> Self {
+        if let Some(_) = world.entity_builder_reuse {
+            return Self::new_from_world_cache(world, entity, component_meta);
+        }
+
         if cap == 0 {
             return Self::new(world, entity, component_meta);
         }

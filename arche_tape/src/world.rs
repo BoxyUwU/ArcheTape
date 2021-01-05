@@ -249,6 +249,22 @@ pub struct World {
 
     pub(crate) lock_lookup: HashMap<EcsId, usize, crate::utils::TypeIdHasherBuilder>,
     pub(crate) locks: Vec<RwLock<()>>,
+
+    /// usize is that cap allocated with the pointer
+    pub(crate) entity_builder_reuse: Option<(Vec<EcsId>, core::ptr::NonNull<u8>, usize)>,
+}
+
+impl Drop for World {
+    fn drop(&mut self) {
+        if let Some((_, ptr, cap)) = self.entity_builder_reuse.take() {
+            unsafe {
+                std::alloc::dealloc(
+                    ptr.as_ptr(),
+                    std::alloc::Layout::from_size_align(cap, 1).unwrap(),
+                );
+            }
+        }
+    }
 }
 
 impl Default for World {
@@ -271,6 +287,8 @@ impl World {
 
             lock_lookup: HashMap::with_hasher(crate::utils::TypeIdHasherBuilder()),
             locks: Vec::new(),
+
+            entity_builder_reuse: None,
         }
     }
 
