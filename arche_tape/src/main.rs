@@ -1,24 +1,40 @@
+use arche_tape::spawn;
 use arche_tape::world::World;
 
-fn main() {
-    let mut world1 = World::new();
-    let mut world2 = World::new();
+macro_rules! setup {
+    ($world:ident, $($x:ident),*) => {
+        $(
+            pub struct $x(());
+        )*
 
-    let e1_w1 = world1.spawn().build();
-    dbg!(e1_w1);
-    world1.despawn(e1_w1);
+        $(
+            for _ in 0..(10_000 / 26) {
+                spawn!(&mut $world,
+                    Transform([1.0; 16]),
+                    Position([1.0; 3]),
+                    Rotation([1.0; 3]),
+                    Velocity([1.0; 3]),
+                    $x(()),
+                );
+            }
+        )*
+    }
+}
 
-    let e1_w2 = world2.spawn().build();
-    dbg!(e1_w2);
-    world2.despawn(e1_w2);
-    let e2_w2 = world2.spawn().build();
-    dbg!(e2_w2);
+#[derive(Copy, Clone)]
+struct Transform([f32; 16]);
+#[derive(Copy, Clone)]
+struct Position([f32; 3]);
+#[derive(Copy, Clone)]
+struct Rotation([f32; 3]);
+#[derive(Copy, Clone)]
+struct Velocity([f32; 3]);
 
-    dbg!(world1.is_alive(e1_w1));
-    dbg!(world1.is_alive(e1_w2));
-    dbg!(world1.is_alive(e2_w2));
-
-    dbg!(world2.is_alive(e1_w1));
-    dbg!(world2.is_alive(e1_w2));
-    dbg!(world2.is_alive(e2_w2));
+pub fn main() {
+    for _ in 0..1_000_0 {
+        let mut world = World::new();
+        setup!(
+            world, A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z
+        );
+    }
 }

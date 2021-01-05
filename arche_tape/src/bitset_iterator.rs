@@ -54,8 +54,8 @@ impl<'a, Iters: BorrowMut<[(Iter<'a, usize>, fn(usize) -> usize)]>> Iterator
             }
 
             self.bits_remaining -= zeros + 1;
-            self.current_bits = usize::wrapping_shr(self.current_bits, zeros + 1);
-            self.index += { zeros + 1 } as usize;
+            self.current_bits >>= zeros + 1;
+            self.index += zeros as usize + 1;
 
             return Some(self.index - 1);
         }
