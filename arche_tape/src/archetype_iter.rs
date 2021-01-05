@@ -15,7 +15,7 @@ mod bitset_iterator {
     }
 
     impl<'a, Iters: BorrowMut<[(Iter<'a, usize>, fn(usize) -> usize)]>> BitsetIterator<'a, Iters> {
-        fn new(iters: Iters, bit_length: u32) -> Self {
+        pub(crate) fn new(iters: Iters, bit_length: u32) -> Self {
             Self {
                 phantom: PhantomData,
                 iters,
@@ -258,5 +258,181 @@ mod bitset_iterator {
             bitset_iter.next().unwrap_none();
             bitset_iter.next().unwrap_none();
         }
+    }
+}
+
+pub struct Bitvec {
+    data: Vec<usize>,
+    /// Length in bits of the bitvec
+    len: usize,
+}
+
+impl Bitvec {
+    fn new() -> Self {
+        Self {
+            data: Vec::new(),
+            len: 0,
+        }
+    }
+
+    fn with_capacity(bit_cap: usize) -> Self {
+        Self {
+            data: Vec::with_capacity(bit_cap / usize::BITS as usize),
+            len: 0,
+        }
+    }
+
+    fn get_bit(&self, index: usize) -> Option<bool> {
+        if index >= self.len {
+            return None;
+        }
+
+        let data_idx = index / usize::BITS as usize;
+        let bit_idx = index % usize::BITS as usize;
+
+        Some(((self.data[data_idx] >> bit_idx) & 1) == 1)
+    }
+
+    fn set_bit(&mut self, index: usize, value: bool) {
+        let data_idx = index / usize::BITS as usize;
+        let bit_idx = index % usize::BITS as usize;
+
+        if index >= self.len {
+            self.len = index + 1;
+
+            if self.data.len() < data_idx + 1 {
+                self.data.resize_with(data_idx + 1, || 0);
+            }
+        }
+
+        let bits = &mut self.data[data_idx];
+        let mask = 1 << bit_idx;
+        *bits &= !mask;
+        *bits |= (value as usize) << bit_idx;
+    }
+}
+
+pub struct Bitsetsss {
+    bitsets: Vec<Option<Bitvec>>,
+}
+
+use crate::EcsId;
+impl Bitsetsss {
+    fn new() -> Self {
+        Self {
+            bitsets: Vec::new(),
+        }
+    }
+
+    fn with_capacity(cap: usize) -> Self {
+        Self {
+            bitsets: Vec::with_capacity(cap),
+        }
+    }
+
+    fn insert_bitvec(&mut self, comp_id: EcsId) {
+        if let None = self.bitsets.get(comp_id.uindex()) {
+            self.bitsets
+                .resize_with(comp_id.uindex() + 1, || Some(Bitvec::new()));
+            return;
+        }
+
+        if let bitset @ None = &mut self.bitsets[comp_id.uindex()] {
+            *bitset = Some(Bitvec::new());
+            return;
+        }
+
+        panic!("Attempted to insert a bitvec that already existed")
+    }
+
+    fn get_bitvec(&self, comp_id: EcsId) -> Option<&Bitvec> {
+        self.bitsets.get(comp_id.uindex())?.as_ref()
+    }
+
+    fn set_bit(&mut self, entity: EcsId, index: usize, value: bool) {
+        let bitvec = (&mut self.bitsets[entity.uindex()])
+            .get_or_insert_with(|| Bitvec::with_capacity(index));
+        bitvec.set_bit(index, value);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BitsetIterator, Bitsetsss};
+    use crate::EcsId;
+
+    #[test]
+    fn insert_one() {
+        let mut bitsets = Bitsetsss::new();
+        let key = EcsId::new(0, 0);
+        bitsets.insert_bitvec(key);
+
+        let bitvec = bitsets.get_bitvec(key).unwrap();
+        assert_eq!(bitvec.data.len(), 0);
+    }
+
+    #[test]
+    fn set_bit() {
+        let mut bitsets = Bitsetsss::new();
+        let key = EcsId::new(0, 0);
+        bitsets.insert_bitvec(key);
+        bitsets.set_bit(key, 0, true);
+        bitsets.set_bit(key, 3, true);
+
+        let bitvec = bitsets.get_bitvec(key).unwrap();
+
+        assert_eq!(bitvec.data[0], 0b1001);
+        assert_eq!(bitvec.len, 4);
+    }
+
+    #[test]
+    fn set_bit_far() {
+        let mut bitsets = Bitsetsss::new();
+        let key = EcsId::new(0, 0);
+        bitsets.insert_bitvec(key);
+        bitsets.set_bit(key, usize::BITS as usize, true);
+
+        let bitvec = bitsets.get_bitvec(key).unwrap();
+        assert_eq!(bitvec.data[0], 0b0);
+        assert_eq!(bitvec.data[1], 0b1);
+        assert_eq!(bitvec.len, (usize::BITS + 1) as _);
+    }
+
+    #[test]
+    fn get_bit() {
+        let mut bitsets = Bitsetsss::new();
+        let key = EcsId::new(0, 0);
+        bitsets.insert_bitvec(key);
+        bitsets.set_bit(key, 3, true);
+
+        let bitvec = bitsets.get_bitvec(key).unwrap();
+        assert!(bitvec.get_bit(3).unwrap());
+    }
+
+    #[test]
+    fn bitset_iterator() {
+        let mut bitsets = Bitsetsss::new();
+
+        let key1 = EcsId::new(0, 0);
+        bitsets.insert_bitvec(key1);
+        bitsets.set_bit(key1, 1, true);
+        bitsets.set_bit(key1, 2, true);
+
+        let key2 = EcsId::new(1, 0);
+        bitsets.insert_bitvec(key2);
+        bitsets.set_bit(key2, 2, true);
+        bitsets.set_bit(key2, 3, true);
+
+        let bitvec1 = bitsets.get_bitvec(key1).unwrap();
+        let bitvec2 = bitsets.get_bitvec(key2).unwrap();
+
+        let map: fn(_) -> _ = |x| x;
+
+        use super::BitsetIterator;
+        let mut bitset_iter =
+            BitsetIterator::new([(bitvec1.data.iter(), map), (bitvec2.data.iter(), map)], 4);
+
+        assert_eq!(bitset_iter.next(), Some(2));
+        bitset_iter.next().unwrap_none();
     }
 }
