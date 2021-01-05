@@ -59,7 +59,9 @@ pub mod frag_iter_20_padding_20 {
                         Bloat19,
                         Bloat20,
                     )),
-                (A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z)
+                (
+                    A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z
+                )
             );
             Benchmark(world)
         }
@@ -278,17 +280,17 @@ pub mod frag_insert {
     macro_rules! setup {
         ($world:ident, $($x:ident),*) => {
             $(
-                pub struct $x(f32);
+                pub struct $x(());
             )*
 
             $(
-                for _ in 0..1_000 {
+                for _ in 0..(10_000 / 26) {
                     spawn!(&mut $world,
                         Transform(Matrix4::from_scale(1.0)),
                         Position(Vector3::unit_x()),
                         Rotation(Vector3::unit_x()),
                         Velocity(Vector3::unit_x()),
-                        $x(1.),
+                        $x(()),
                     );
                 }
             )*
@@ -560,6 +562,14 @@ pub mod padded_get {
 
 pub fn arche_tape(c: &mut Criterion) {
     let mut group = c.benchmark_group("arche_tape");
+    group.bench_function("simple_insert_10_000", |b| {
+        let mut bench = simple_insert::Benchmark::new();
+        b.iter(move || bench.run());
+    });
+    group.bench_function("frag_insert_1_000_x_26", |b| {
+        let mut bench = frag_insert::Benchmark::new();
+        b.iter(move || bench.run());
+    });
     group.bench_function("add_remove_10_000", |b| {
         let mut bench = add_remove::Benchmark::new();
         b.iter(move || bench.run());
@@ -602,14 +612,6 @@ pub fn arche_tape(c: &mut Criterion) {
     });
     group.bench_function("simple_large_iter", |b| {
         let mut bench = simple_large_iter::Benchmark::new();
-        b.iter(move || bench.run());
-    });
-    group.bench_function("simple_insert_10_000", |b| {
-        let mut bench = simple_insert::Benchmark::new();
-        b.iter(move || bench.run());
-    });
-    group.bench_function("frag_insert_1_000_x_26", |b| {
-        let mut bench = frag_insert::Benchmark::new();
         b.iter(move || bench.run());
     });
 }
