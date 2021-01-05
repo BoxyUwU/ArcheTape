@@ -167,7 +167,7 @@ mod entities {
 
 #[cfg(test)]
 mod world {
-    use crate::{EcsId, World, spawn, world::ComponentMeta};
+    use crate::{spawn, world::ComponentMeta, EcsId, World};
 
     #[test]
     pub fn get() {
@@ -449,7 +449,7 @@ mod world {
 
 #[cfg(test)]
 mod archetype_iter {
-    use crate::{EcsId, World, archetype_iter::*, entities::Entities, spawn};
+    use crate::{entities::Entities, query::Query, spawn, EcsId, World};
 
     #[test]
     fn for_each_mut() {
@@ -558,14 +558,95 @@ mod archetype_iter {
 }
 
 #[cfg(test)]
-mod biset_iterator {
-    use crate::bitset_iterator::BitsetIterator;
+mod bitsetsss {
+    use crate::archetype_iter::Bitsetsss;
+    use crate::EcsId;
+
+    #[test]
+    fn insert_one() {
+        let mut bitsets = Bitsetsss::new();
+        let key = EcsId::new(0, 0);
+        bitsets.insert_bitvec(key);
+
+        let bitvec = bitsets.get_bitvec(key).unwrap();
+        assert_eq!(bitvec.data.len(), 0);
+    }
+
+    #[test]
+    fn set_bit() {
+        let mut bitsets = Bitsetsss::new();
+        let key = EcsId::new(0, 0);
+        bitsets.insert_bitvec(key);
+        bitsets.set_bit(key, 0, true);
+        bitsets.set_bit(key, 3, true);
+
+        let bitvec = bitsets.get_bitvec(key).unwrap();
+
+        assert_eq!(bitvec.data[0], 0b1001);
+        assert_eq!(bitvec.len, 4);
+    }
+
+    #[test]
+    fn set_bit_far() {
+        let mut bitsets = Bitsetsss::new();
+        let key = EcsId::new(0, 0);
+        bitsets.insert_bitvec(key);
+        bitsets.set_bit(key, usize::BITS as usize, true);
+
+        let bitvec = bitsets.get_bitvec(key).unwrap();
+        assert_eq!(bitvec.data[0], 0b0);
+        assert_eq!(bitvec.data[1], 0b1);
+        assert_eq!(bitvec.len, (usize::BITS + 1) as usize);
+    }
+
+    #[test]
+    fn get_bit() {
+        let mut bitsets = Bitsetsss::new();
+        let key = EcsId::new(0, 0);
+        bitsets.insert_bitvec(key);
+        bitsets.set_bit(key, 3, true);
+
+        let bitvec = bitsets.get_bitvec(key).unwrap();
+        assert!(bitvec.get_bit(3).unwrap());
+    }
+
+    #[test]
+    fn bitset_iterator() {
+        let mut bitsets = Bitsetsss::new();
+
+        let key1 = EcsId::new(0, 0);
+        bitsets.insert_bitvec(key1);
+        bitsets.set_bit(key1, 1, true);
+        bitsets.set_bit(key1, 2, true);
+
+        let key2 = EcsId::new(1, 0);
+        bitsets.insert_bitvec(key2);
+        bitsets.set_bit(key2, 2, true);
+        bitsets.set_bit(key2, 3, true);
+
+        let bitvec1 = bitsets.get_bitvec(key1).unwrap();
+        let bitvec2 = bitsets.get_bitvec(key2).unwrap();
+
+        let map: fn(_) -> _ = |x| x;
+
+        use crate::archetype_iter::BitsetIterator;
+        let mut bitset_iter =
+            BitsetIterator::new([(bitvec1.data.iter(), map), (bitvec2.data.iter(), map)], 4);
+
+        assert_eq!(bitset_iter.next(), Some(2));
+        bitset_iter.next().unwrap_none();
+    }
+}
+
+#[cfg(test)]
+mod bitset_iterator {
+    use crate::archetype_iter::BitsetIterator;
 
     #[test]
     fn empty_bitset() {
         let map: fn(_) -> _ = |x| x;
         let data = vec![];
-        let mut bitset_iter = BitsetIterator::new([(data.iter(), map)]);
+        let mut bitset_iter = BitsetIterator::new([(data.iter(), map)], 0);
 
         bitset_iter.next().unwrap_none();
     }
@@ -574,7 +655,7 @@ mod biset_iterator {
     fn single_bitset() {
         let map: fn(_) -> _ = |x| x;
         let data = vec![0b0000_1011];
-        let mut bitset_iter = BitsetIterator::new([(data.iter(), map)]);
+        let mut bitset_iter = BitsetIterator::new([(data.iter(), map)], usize::BITS);
 
         assert_eq!(bitset_iter.next(), Some(0));
         assert_eq!(bitset_iter.next(), Some(1));
@@ -586,7 +667,7 @@ mod biset_iterator {
     fn gapped_bitset() {
         let map: fn(_) -> _ = |x| x;
         let data = vec![0, 0b101];
-        let mut bitset_iter = BitsetIterator::new([(data.iter(), map)]);
+        let mut bitset_iter = BitsetIterator::new([(data.iter(), map)], usize::BITS * 2);
 
         assert_eq!(bitset_iter.next(), Some(64));
         assert_eq!(bitset_iter.next(), Some(66));
@@ -600,11 +681,14 @@ mod biset_iterator {
         let data2 = vec![0b0110_1110];
         let data3 = vec![0b1110_0110];
 
-        let mut bitset_iter = BitsetIterator::new([
-            (data1.iter(), map),
-            (data2.iter(), map),
-            (data3.iter(), map),
-        ]);
+        let mut bitset_iter = BitsetIterator::new(
+            [
+                (data1.iter(), map),
+                (data2.iter(), map),
+                (data3.iter(), map),
+            ],
+            usize::BITS,
+        );
 
         assert_eq!(bitset_iter.next(), Some(1));
         assert_eq!(bitset_iter.next(), Some(5));
@@ -619,8 +703,10 @@ mod biset_iterator {
         let data1 = vec![0b1010_1011];
         let data2 = vec![0b0111_0110];
 
-        let mut bitset_iter =
-            BitsetIterator::new([(data1.iter(), map), (data2.iter(), invert_map)]);
+        let mut bitset_iter = BitsetIterator::new(
+            [(data1.iter(), map), (data2.iter(), invert_map)],
+            usize::BITS,
+        );
 
         assert_eq!(bitset_iter.next(), Some(0));
         assert_eq!(bitset_iter.next(), Some(3));
@@ -632,11 +718,215 @@ mod biset_iterator {
     fn all_ones() {
         let map: fn(_) -> _ = |x| x;
         let data = vec![usize::MAX];
-        let mut bitset_iter = BitsetIterator::new([(data.iter(), map)]);
+        let mut bitset_iter = BitsetIterator::new([(data.iter(), map)], usize::BITS);
 
         for n in 0..usize::BITS {
             assert_eq!(bitset_iter.next(), Some(n as _));
         }
         bitset_iter.next().unwrap_none();
+    }
+
+    #[test]
+    fn bit_length() {
+        let map: fn(_) -> _ = |x| x;
+        let data = vec![0b101];
+        let mut bitset_iter = BitsetIterator::new([(data.iter(), map)], 2);
+
+        assert_eq!(bitset_iter.next(), Some(0));
+        bitset_iter.next().unwrap_none();
+    }
+
+    #[test]
+    fn long_bit_length() {
+        let map: fn(_) -> _ = |x| x;
+        let data = vec![0b0, usize::MAX];
+        let mut bitset_iter = BitsetIterator::new([(data.iter(), map)], usize::BITS * 2);
+
+        for n in 0..usize::BITS {
+            let n = n + 64;
+            assert_eq!(bitset_iter.next(), Some(n as _));
+        }
+        bitset_iter.next().unwrap_none();
+    }
+
+    #[test]
+    fn incorrect_bit_length() {
+        let map: fn(_) -> _ = |x| x;
+        let data = vec![0b101];
+        let mut bitset_iter = BitsetIterator::new([(data.iter(), map)], 2000);
+
+        assert_eq!(bitset_iter.next(), Some(0));
+        assert_eq!(bitset_iter.next(), Some(2));
+        bitset_iter.next().unwrap_none();
+    }
+
+    #[test]
+    fn returns_none_continuously_incorrect_bit_length() {
+        let map: fn(_) -> _ = |x| x;
+        let data = vec![0b101];
+        let mut bitset_iter = BitsetIterator::new([(data.iter(), map)], 2000);
+
+        assert_eq!(bitset_iter.next(), Some(0));
+        assert_eq!(bitset_iter.next(), Some(2));
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+    }
+
+    #[test]
+    fn returns_none_continuously_bit_length() {
+        let map: fn(_) -> _ = |x| x;
+        let data = vec![0b101];
+        let mut bitset_iter = BitsetIterator::new([(data.iter(), map)], 3);
+
+        assert_eq!(bitset_iter.next(), Some(0));
+        assert_eq!(bitset_iter.next(), Some(2));
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+    }
+
+    #[test]
+    fn returns_none_continuously() {
+        let map: fn(_) -> _ = |x| x;
+        let data = vec![usize::MAX];
+        // the iterator will end because of there being no more iterator left not because of the bit_length
+        let mut bitset_iter = BitsetIterator::new([(data.iter(), map)], usize::BITS);
+
+        for n in 0..usize::BITS {
+            assert_eq!(bitset_iter.next(), Some(n as _));
+        }
+
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+        bitset_iter.next().unwrap_none();
+    }
+}
+
+#[cfg(test)]
+mod query {
+    use crate::{EcsId, World, entities::Entities, query::*};
+
+    #[test]
+    fn for_each_mut() {
+        let mut world = World::new();
+
+        spawn!(&mut world, 10_u32, 12_u64);
+        spawn!(&mut world, 15_u32, 14_u64);
+        spawn!(&mut world, 20_u32, 16_u64);
+
+        let query = world.query::<(&mut u32, &u64)>();
+        let mut checks = vec![(10, 12), (15, 14), (20, 16)].into_iter();
+        query.borrow().for_each_mut(|(left, right)| {
+            assert_eq!(checks.next().unwrap(), (*left, *right));
+        });
+        assert_eq!(checks.next(), None);
+    }
+
+    #[test]
+    fn for_each_iterator() {
+        let mut world = World::new();
+
+        spawn!(&mut world, 10_u32, 12_u64);
+        spawn!(&mut world, 15_u32, 14_u64);
+        spawn!(&mut world, 20_u32, 16_u64);
+
+        let query = world.query::<(&mut u32, &u64)>();
+
+        let mut checks = vec![(10, 12), (15, 14), (20, 16)].into_iter();
+        query
+            .borrow()
+            .for_each_mut(|(left, right)| assert_eq!((*left, *right), checks.next().unwrap()));
+        assert!(checks.next().is_none());
+    }
+
+    #[test]
+    fn for_each_subset_iterator() {
+        let mut world = World::new();
+
+        spawn!(&mut world, 10_u32, 12_u64);
+        spawn!(&mut world, 15_u32, 14_u64);
+        spawn!(&mut world, 20_u32, 16_u64);
+
+        let query = world.query::<(&mut u32,)>();
+
+        let mut checks = vec![10, 15, 20].into_iter();
+        query
+            .borrow()
+            .for_each_mut(|(left,)| assert_eq!(*left, checks.next().unwrap()));
+        assert!(checks.next().is_none());
+    }
+
+    #[test]
+    fn for_each_multi_archetype_iterator() {
+        let mut world = World::new();
+
+        spawn!(&mut world, 10_u32, 12_u64);
+        spawn!(&mut world, 15_u32, 14_u64);
+        spawn!(&mut world, 20_u32, 16_u64);
+
+        spawn!(&mut world, 11_u32, 12_u64, 99_u128);
+        spawn!(&mut world, 16_u32, 14_u64, 99_u128);
+        spawn!(&mut world, 21_u32, 16_u64, 99_u128);
+
+        let query = world.query::<(&mut u32,)>();
+
+        let mut checks = vec![10, 15, 20, 11, 16, 21].into_iter();
+        query
+            .borrow()
+            .for_each_mut(|(left,)| assert_eq!(*left, checks.next().unwrap()));
+        assert!(checks.next().is_none());
+    }
+
+    #[test]
+    fn query_param_in_func() {
+        let mut world = World::new();
+        spawn!(&mut world, 10_u32, 12_u64);
+        let query = world.query::<(&u32, &u64)>();
+
+        fn func(query: Query<(&u32, &u64)>) {
+            let mut ran = false;
+            query.borrow().for_each_mut(|(left, right)| {
+                assert!(*left == 10);
+                assert!(*right == 12);
+                ran = true;
+            });
+            assert!(ran);
+        }
+
+        func(query);
+    }
+
+    #[test]
+    fn entity_query() {
+        let mut world = World::new();
+
+        spawn!(&mut world, 1_u32, 12_u64);
+
+        let query = world.query::<(Entities, &u32, &u64)>();
+
+        let mut checks = vec![(EcsId::new(0, 0), 1, 12)].into_iter();
+        query.borrow().for_each_mut(|(entity, left, right)| {
+            assert!(checks.next().unwrap() == (entity, *left, *right));
+        });
+        assert!(checks.next().is_none());
     }
 }

@@ -363,7 +363,7 @@ impl Drop for UntypedVec {
 }
 
 #[cfg(test)]
-mod tests {
+mod untyped_vec {
     use super::*;
     use core::mem::ManuallyDrop;
 
