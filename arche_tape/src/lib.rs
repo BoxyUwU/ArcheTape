@@ -7,14 +7,14 @@
 )]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-mod bitset_iterator;
+mod archetype_iter;
 
 pub mod entities;
 pub mod entity_builder;
 pub mod world;
 
-pub(crate) mod archetype_iter;
 pub(crate) mod array_vec;
+pub(crate) mod query;
 
 #[macro_export]
 macro_rules! spawn {

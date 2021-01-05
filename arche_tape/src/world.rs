@@ -1,5 +1,5 @@
-use super::archetype_iter::{Query, QueryInfos};
 use super::entities::{EcsId, Entities};
+use super::query::{Query, QueryInfos};
 use crate::array_vec::ArrayVec;
 use std::any::TypeId;
 use std::cell::UnsafeCell;
