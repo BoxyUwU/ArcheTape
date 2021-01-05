@@ -28,6 +28,8 @@ macro_rules! spawn {
 pub use entities::EcsId;
 pub use world::World;
 
+mod tests;
+
 pub mod utils {
     use std::convert::TryInto;
     use std::hash::BuildHasher;
