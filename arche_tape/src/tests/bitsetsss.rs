@@ -75,3 +75,44 @@ fn bitset_iterator() {
     assert_eq!(bitset_iter.next(), Some(2));
     bitset_iter.next().unwrap_none();
 }
+
+#[test]
+fn empty_push_bit() {
+    let mut bitsets = Bitsetsss::new();
+
+    let key = EcsId::new(0, 0);
+    bitsets.insert_bitvec(key);
+    bitsets.push_bit(key, true);
+
+    let bitvec = bitsets.get_bitvec(key).unwrap();
+    assert!(bitvec.get_bit(0).unwrap() == true);
+    bitvec.get_bit(1).unwrap_none();
+}
+
+#[test]
+fn push_bit() {
+    let mut bitsets = Bitsetsss::new();
+
+    let key = EcsId::new(0, 0);
+    bitsets.insert_bitvec(key);
+    bitsets.set_bit(key, 3, true);
+    bitsets.push_bit(key, true);
+
+    let bitvec = bitsets.get_bitvec(key).unwrap();
+    assert!(bitvec.get_bit(4).unwrap() == true);
+    bitvec.get_bit(5).unwrap_none();
+}
+
+#[test]
+fn push_bit_segmented() {
+    let mut bitsets = Bitsetsss::new();
+
+    let key = EcsId::new(0, 0);
+    bitsets.insert_bitvec(key);
+    bitsets.set_bit(key, (usize::BITS - 1) as usize, false);
+    bitsets.push_bit(key, true);
+
+    let bitvec = bitsets.get_bitvec(key).unwrap();
+    assert!(bitvec.get_bit(64).unwrap() == true);
+    bitvec.get_bit(65).unwrap_none();
+}

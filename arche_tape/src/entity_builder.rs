@@ -277,6 +277,14 @@ impl<'a> EntityBuilder<'a> {
             }
 
             let archetype = self.create_archetype();
+
+            for id in archetype.comp_ids.iter() {
+                self.world
+                    .archetype_bitset
+                    .set_bit(*id, self.world.archetypes.len(), true);
+            }
+            self.world.entities_bitvec.push_bit(true);
+
             self.world.archetypes.push(archetype);
             let (archetype_idx, entity_idx) = (ArchIndex(self.world.archetypes.len() - 1), 0);
 

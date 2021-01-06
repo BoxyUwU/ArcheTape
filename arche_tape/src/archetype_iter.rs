@@ -3,7 +3,10 @@ pub use bitset_iterator::BitsetIterator;
 mod bitset_iterator {
 
     use std::{borrow::BorrowMut, marker::PhantomData, slice::Iter};
-    pub struct BitsetIterator<'a, Iters: BorrowMut<[(Iter<'a, usize>, fn(usize) -> usize)]>> {
+    pub struct BitsetIterator<'a, Iters>
+    where
+        Iters: BorrowMut<[(Iter<'a, usize>, fn(usize) -> usize)]>,
+    {
         phantom: PhantomData<&'a [usize]>,
         iters: Iters,
 
@@ -14,7 +17,10 @@ mod bitset_iterator {
         current_bits: usize,
     }
 
-    impl<'a, Iters: BorrowMut<[(Iter<'a, usize>, fn(usize) -> usize)]>> BitsetIterator<'a, Iters> {
+    impl<'a, Iters> BitsetIterator<'a, Iters>
+    where
+        Iters: BorrowMut<[(Iter<'a, usize>, fn(usize) -> usize)]>,
+    {
         pub(crate) fn new(iters: Iters, bit_length: u32) -> Self {
             Self {
                 phantom: PhantomData,
@@ -127,10 +133,14 @@ impl Bitvec {
         *bits &= !mask;
         *bits |= (value as usize) << bit_idx;
     }
+
+    pub(crate) fn push_bit(&mut self, value: bool) {
+        self.set_bit(self.len, value);
+    }
 }
 
 pub struct Bitsetsss {
-    bitsets: Vec<Option<Bitvec>>,
+    bitsets: Vec<Bitvec>,
 }
 
 use crate::EcsId;
@@ -150,12 +160,7 @@ impl Bitsetsss {
     pub(crate) fn insert_bitvec(&mut self, comp_id: EcsId) {
         if let None = self.bitsets.get(comp_id.uindex()) {
             self.bitsets
-                .resize_with(comp_id.uindex() + 1, || Some(Bitvec::new()));
-            return;
-        }
-
-        if let bitset @ None = &mut self.bitsets[comp_id.uindex()] {
-            *bitset = Some(Bitvec::new());
+                .resize_with(comp_id.uindex() + 1, || Bitvec::new());
             return;
         }
 
@@ -163,12 +168,24 @@ impl Bitsetsss {
     }
 
     pub(crate) fn get_bitvec(&self, comp_id: EcsId) -> Option<&Bitvec> {
-        self.bitsets.get(comp_id.uindex())?.as_ref()
+        self.bitsets.get(comp_id.uindex())
     }
 
     pub(crate) fn set_bit(&mut self, entity: EcsId, index: usize, value: bool) {
-        let bitvec = (&mut self.bitsets[entity.uindex()])
-            .get_or_insert_with(|| Bitvec::with_capacity(index));
+        if entity.uindex() >= self.bitsets.len() {
+            self.insert_bitvec(entity);
+        }
+
+        let bitvec = &mut self.bitsets[entity.uindex()];
         bitvec.set_bit(index, value);
+    }
+
+    pub(crate) fn push_bit(&mut self, entity: EcsId, value: bool) {
+        if entity.uindex() >= self.bitsets.len() {
+            self.insert_bitvec(entity);
+        }
+
+        let bitvec = &mut self.bitsets[entity.uindex()];
+        bitvec.push_bit(value);
     }
 }

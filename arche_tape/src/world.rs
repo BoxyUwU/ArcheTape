@@ -1,10 +1,13 @@
 use super::entities::{EcsId, Entities};
 use super::query::{Query, QueryInfos};
-use crate::array_vec::ArrayVec;
-use std::any::TypeId;
+use crate::{
+    archetype_iter::{BitsetIterator, Bitsetsss, Bitvec},
+    array_vec::ArrayVec,
+};
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::sync::RwLock;
+use std::{any::TypeId, borrow::BorrowMut, slice::Iter};
 use untyped_vec::UntypedVec;
 
 const CACHE_SIZE: usize = 4;
@@ -242,6 +245,9 @@ impl ComponentMeta {
 
 pub struct World {
     pub(crate) archetypes: Vec<Archetype>,
+    pub(crate) archetype_bitset: Bitsetsss,
+    pub(crate) entities_bitvec: Bitvec,
+
     entities: Entities,
 
     ecs_id_meta: Vec<Option<EntityMeta>>,
@@ -277,6 +283,9 @@ impl World {
     pub fn new() -> Self {
         Self {
             archetypes: Vec::new(),
+            archetype_bitset: Bitsetsss::with_capacity(32),
+            entities_bitvec: Bitvec::with_capacity(32),
+
             entities: Entities::new(),
 
             ecs_id_meta: Vec::with_capacity(32),
@@ -444,32 +453,37 @@ impl World {
         }
     }
 
-    pub fn query_archetypes<T: QueryInfos>(&self) -> impl Iterator<Item = usize> + '_ {
-        let type_ids = T::comp_ids(&self.type_id_to_ecs_id);
-
-        self.archetypes
-            .iter()
-            .enumerate()
-            .filter(move |(_, archetype)| {
-                type_ids.iter().all(|id| {
-                    if let Some(id) = id {
-                        archetype.comp_ids.contains(id)
-                    } else {
-                        // If id is none then the id should be skipped
-                        true
-                    }
-                })
-            })
-            .map(|(n, _)| n)
+    pub fn query_archetypes<'a, Iters>(
+        &'a self,
+        iters: Iters,
+        bit_length: u32,
+    ) -> impl Iterator<Item = &'a Archetype> + 'a
+    where
+        Iters: BorrowMut<[(Iter<'a, usize>, fn(usize) -> usize)]> + 'a,
+    {
+        BitsetIterator::new(iters, bit_length).map(move |idx| &self.archetypes[idx])
     }
 
-    pub fn find_archetype_dynamic(&mut self, comp_ids: &[EcsId]) -> Option<ArchIndex> {
-        self.archetypes
+    pub(crate) fn find_archetype_dynamic(&mut self, comp_ids: &[EcsId]) -> Option<ArchIndex> {
+        let mut bit_length = u32::MAX;
+        let identity: fn(_) -> _ = |x: usize| x;
+
+        for id in comp_ids {
+            let bitvec = self.archetype_bitset.get_bitvec(*id)?;
+            if bitvec.len < bit_length as _ {
+                bit_length = bitvec.len as _;
+            }
+        }
+
+        let iters = comp_ids
             .iter()
-            .position(|archetype| {
-                archetype.comp_ids.len() == comp_ids.len()
-                    && comp_ids.iter().all(|id| archetype.comp_ids.contains(id))
-            })
+            .map(|&id| self.archetype_bitset.get_bitvec(id).unwrap().data.iter())
+            .map(|bitvec| (bitvec, identity))
+            .collect::<Box<[_]>>();
+
+        BitsetIterator::new(iters, bit_length)
+            .filter(|idx| self.archetypes[*idx].comp_ids.len() == comp_ids.len())
+            .next()
             .map(ArchIndex)
     }
 
@@ -478,13 +492,33 @@ impl World {
         comp_ids: &[EcsId],
         extra_id: EcsId,
     ) -> Option<usize> {
-        let position = self.archetypes.iter().position(|archetype| {
-            archetype.comp_ids.len() == comp_ids.len() + 1
-                && comp_ids.iter().all(|id| archetype.comp_ids.contains(id))
-                && archetype.comp_ids.contains(&extra_id)
-        });
+        let identity: fn(_) -> _ = |x: usize| x;
 
-        position
+        let mut bit_length = u32::MAX;
+        for id in comp_ids.iter().chain(std::iter::once(&extra_id)) {
+            let bitvec = self.archetype_bitset.get_bitvec(*id)?;
+            if bitvec.len < bit_length as _ {
+                bit_length = bitvec.len as _;
+            }
+        }
+
+        let iters = comp_ids
+            .iter()
+            .map(|&id| self.archetype_bitset.get_bitvec(id).unwrap().data.iter())
+            .map(|iter| (iter, identity))
+            .chain(std::iter::once((
+                self.archetype_bitset
+                    .get_bitvec(extra_id)
+                    .unwrap()
+                    .data
+                    .iter(),
+                identity,
+            )))
+            .collect::<Box<[_]>>();
+
+        BitsetIterator::new(iters, bit_length)
+            .filter(|idx| self.archetypes[*idx].comp_ids.len() == comp_ids.len() + 1)
+            .next()
     }
 
     pub fn find_archetype_dynamic_minus_id(
@@ -492,15 +526,26 @@ impl World {
         comp_ids: &[EcsId],
         without_id: EcsId,
     ) -> Option<usize> {
-        let position = self.archetypes.iter().position(|archetype| {
-            archetype.comp_ids.len() == comp_ids.len() - 1
-                && archetype
-                    .comp_ids
-                    .iter()
-                    .all(|id| *id != without_id && comp_ids.contains(id))
-        });
+        let identity: fn(_) -> _ = |x: usize| x;
 
-        position
+        let mut bit_length = u32::MAX;
+        for id in comp_ids.iter().filter(|&&id| id != without_id) {
+            let bitvec = self.archetype_bitset.get_bitvec(*id)?;
+            if bitvec.len < bit_length as _ {
+                bit_length = bitvec.len as _;
+            }
+        }
+
+        let iters = comp_ids
+            .iter()
+            .filter(|&&id| id != without_id)
+            .map(|&id| self.archetype_bitset.get_bitvec(id).unwrap().data.iter())
+            .map(|iter| (iter, identity))
+            .collect::<Box<[_]>>();
+
+        BitsetIterator::new(iters, bit_length)
+            .filter(|idx| self.archetypes[*idx].comp_ids.len() == comp_ids.len() - 1)
+            .next()
     }
 
     /// # Safety
@@ -574,6 +619,12 @@ impl World {
                         comp_id,
                     )
                 };
+
+                for id in archetype.comp_ids.iter() {
+                    self.archetype_bitset
+                        .set_bit(*id, self.archetypes.len(), true);
+                }
+                self.entities_bitvec.push_bit(true);
 
                 self.archetypes.push(archetype);
 
@@ -691,6 +742,12 @@ impl World {
                     &mut self.archetypes[current_archetype_idx.0],
                     comp_id,
                 );
+
+                for id in archetype.comp_ids.iter() {
+                    self.archetype_bitset
+                        .set_bit(*id, self.archetypes.len(), true);
+                }
+                self.entities_bitvec.push_bit(true);
 
                 self.archetypes.push(archetype);
 

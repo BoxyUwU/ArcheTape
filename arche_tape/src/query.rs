@@ -1,5 +1,7 @@
 #![allow(clippy::eval_order_dependence)]
 
+use crate::archetype_iter::{Bitsetsss, Bitvec};
+
 use super::entities::{EcsId, Entities};
 use super::world::{Archetype, World};
 use std::any::TypeId;
@@ -72,13 +74,33 @@ macro_rules! impl_query_infos {
 
         impl<'a, 'guard: 'a, $($x: Borrow<'a, 'guard>,)*> Query<'a, ($($x,)*)> {
             pub fn borrow<'this: 'guard>(&'this self) -> QueryBorrow<'a, 'guard, ($($x,)*), ($($x::StorageBorrow,)*), ($($x::Lock,)*)> {
-                let archetypes = self.world.query_archetypes::<($($x,)*)>();
+                let ecs_ids = [$($x::get_ecs_id(&self.world.type_id_to_ecs_id),)*];
+                let mut n = 0;
+                let mut bit_length = None;
+                let archetypes = self.world.query_archetypes(
+                    [
+                        $({
+                            n += 1;
+                            let (iter, bit_len) = $x::make_bitset_iter(&self.world.entities_bitvec, &self.world.archetype_bitset, ecs_ids[n - 1]);
+                            if let None = bit_length {
+                                bit_length = Some(bit_len);
+                            }
+                            if matches!(bit_length, Some(l) if bit_len < l) {
+                                bit_length = Some(bit_len);
+                            }
+
+                            let map: fn(_) -> _ = |x| x;
+                            (iter, map)
+                        },)*
+                    ],
+                    bit_length.unwrap()
+                );
+
                 let mut borrows: Vec<($($x::StorageBorrow,)*)> = Vec::with_capacity(16);
 
-                let ecs_ids = [$($x::get_ecs_id(&self.world.type_id_to_ecs_id),)*];
 
                 let locks = Self::acquire_locks(&self.world.lock_lookup, &self.world.locks, &ecs_ids);
-                for archetype in archetypes.map(|idx| self.world.archetypes.get(idx).unwrap()) {
+                for archetype in archetypes {
                     <Query<($($x,)*)>>::borrow_storages(&mut borrows, archetype, &ecs_ids);
                 }
 
@@ -293,6 +315,12 @@ pub unsafe trait Borrow<'b, 'guard: 'b>: Sized + 'static {
 
     /// Used to create EcsId's needed for this query.
     fn type_id() -> Option<TypeId>;
+
+    fn make_bitset_iter<'a>(
+        always_true: &'a Bitvec,
+        bitsets: &'a Bitsetsss,
+        id: Option<EcsId>,
+    ) -> (Iter<'a, usize>, u32);
 }
 
 unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
@@ -357,6 +385,15 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
     fn type_id() -> Option<TypeId> {
         Some(TypeId::of::<Self::Of>())
     }
+
+    fn make_bitset_iter<'a>(
+        _: &'a Bitvec,
+        bitsets: &'a Bitsetsss,
+        id: Option<EcsId>,
+    ) -> (Iter<'a, usize>, u32) {
+        let bitvec = bitsets.get_bitvec(id.unwrap()).unwrap();
+        (bitvec.data.iter(), bitvec.len as u32)
+    }
 }
 unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
     type Of = T;
@@ -420,6 +457,15 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
     fn type_id() -> Option<TypeId> {
         Some(TypeId::of::<Self::Of>())
     }
+
+    fn make_bitset_iter<'a>(
+        _: &'a Bitvec,
+        bitsets: &'a Bitsetsss,
+        id: Option<EcsId>,
+    ) -> (Iter<'a, usize>, u32) {
+        let bitvec = bitsets.get_bitvec(id.unwrap()).unwrap();
+        (bitvec.data.iter(), bitvec.len as u32)
+    }
 }
 
 unsafe impl<'b, 'guard: 'b> Borrow<'b, 'guard> for Entities {
@@ -469,5 +515,13 @@ unsafe impl<'b, 'guard: 'b> Borrow<'b, 'guard> for Entities {
 
     fn type_id() -> Option<TypeId> {
         None
+    }
+
+    fn make_bitset_iter<'a>(
+        always_true: &'a Bitvec,
+        _: &'a Bitsetsss,
+        _: Option<EcsId>,
+    ) -> (Iter<'a, usize>, u32) {
+        (always_true.data.iter(), u32::MAX)
     }
 }
