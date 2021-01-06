@@ -28,6 +28,7 @@ macro_rules! spawn {
 pub use entities::EcsId;
 pub use world::World;
 
+#[cfg(test)]
 mod tests;
 
 pub mod utils {
