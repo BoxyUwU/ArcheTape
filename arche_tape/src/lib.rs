@@ -29,7 +29,14 @@ pub use entities::EcsId;
 pub use world::World;
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    mod archetype_iter;
+    mod bitset_iterator;
+    mod bitsetsss;
+    mod entities;
+    mod query;
+    mod world;
+}
 
 pub mod utils {
     use std::convert::TryInto;
