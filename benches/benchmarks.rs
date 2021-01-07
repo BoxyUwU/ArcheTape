@@ -566,7 +566,7 @@ pub fn arche_tape(c: &mut Criterion) {
         let mut bench = simple_insert::Benchmark::new();
         b.iter(move || bench.run());
     });
-    group.bench_function("frag_insert_1_000_x_26", |b| {
+    group.bench_function("frag_insert_10_000_/_26", |b| {
         let mut bench = frag_insert::Benchmark::new();
         b.iter(move || bench.run());
     });
