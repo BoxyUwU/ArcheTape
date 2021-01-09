@@ -23,6 +23,9 @@ macro_rules! spawn {
             $(.with($c))*
             .build()
     };
+    (&mut $world:ident) => {
+        $world.spawn().build()
+    };
 }
 
 pub use entities::EcsId;
