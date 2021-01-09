@@ -14,6 +14,7 @@ pub mod entity_builder;
 pub mod world;
 
 pub(crate) mod array_vec;
+pub(crate) mod dyn_query;
 pub(crate) mod query;
 
 #[macro_export]
