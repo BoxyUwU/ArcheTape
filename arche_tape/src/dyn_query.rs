@@ -168,7 +168,7 @@ impl<'a, const N: usize> DynamicQuery<'a, N> {
         }
     }
 
-    fn iter(&mut self) -> QueryIter<'_, impl Iterator<Item = &'_ Archetype>, N> {
+    pub fn iter(&mut self) -> QueryIter<'_, impl Iterator<Item = &'_ Archetype>, N> {
         const none_id: Option<EcsId> = None;
         let mut ecs_ids = [none_id; N];
         for (fetch, ecs_id) in self.fetches.iter().zip(ecs_ids.iter_mut()) {
@@ -186,7 +186,6 @@ impl<'a, const N: usize> DynamicQuery<'a, N> {
         let archetype_iter = if self.incomplete {
             let bit_length = 0;
             let neg_fn: fn(_) -> _ = |x: usize| !x;
-            let always_true = self.world.entities_bitvec.data.iter();
 
             use std::convert::TryInto;
             let iters: Box<[_; N]> = vec![(self.world.entities_bitvec.data.iter(), neg_fn); N]
@@ -232,7 +231,7 @@ impl<'a, const N: usize> DynamicQuery<'a, N> {
 }
 
 #[test]
-fn for_each_mut() {
+fn iter() {
     let mut world = World::new();
 
     use crate::world::ComponentMeta;
