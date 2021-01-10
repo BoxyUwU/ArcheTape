@@ -344,6 +344,20 @@ impl UntypedVec {
             std::slice::from_raw_parts_mut(self.data.as_ptr() as *mut T, slice_len)
         }
     }
+
+    /// # Safety
+    ///
+    /// Must not mutate through this ptr or use it after it has been invalidated
+    pub unsafe fn as_immut_ptr(&self) -> *const u8 {
+        self.data.as_ptr()
+    }
+
+    /// # Safety
+    ///
+    /// Must not use this ptr after it has been invalidated
+    pub unsafe fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.data.as_ptr()
+    }
 }
 
 impl Drop for UntypedVec {
