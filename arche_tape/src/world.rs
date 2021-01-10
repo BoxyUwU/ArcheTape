@@ -465,6 +465,11 @@ impl World {
     }
 
     pub(crate) fn find_archetype_dynamic(&mut self, comp_ids: &[EcsId]) -> Option<ArchIndex> {
+        if self.archetypes.len() > 0 && comp_ids.len() == 0 {
+            assert!(self.archetypes[0].comp_ids.len() == 0);
+            return Some(ArchIndex(0));
+        }
+
         let mut bit_length = u32::MAX;
         let identity: fn(_) -> _ = |x: usize| x;
 
@@ -526,6 +531,11 @@ impl World {
         comp_ids: &[EcsId],
         without_id: EcsId,
     ) -> Option<usize> {
+        if self.archetypes.len() > 0 && comp_ids.len() == 1 {
+            assert!(self.archetypes[0].comp_ids.len() == 0);
+            return Some(0);
+        }
+
         let identity: fn(_) -> _ = |x: usize| x;
 
         let mut bit_length = u32::MAX;
