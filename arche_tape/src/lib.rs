@@ -7,15 +7,6 @@
 )]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-mod archetype_iter;
-
-pub mod entities;
-pub mod entity_builder;
-pub mod world;
-
-pub(crate) mod array_vec;
-pub(crate) mod query;
-
 #[macro_export]
 macro_rules! spawn {
     (&mut $world:ident, $($c:expr),* $(,)?) => {
@@ -27,6 +18,16 @@ macro_rules! spawn {
         $world.spawn().build()
     };
 }
+
+mod archetype_iter;
+
+pub mod entities;
+pub mod entity_builder;
+pub mod world;
+
+pub(crate) mod array_vec;
+pub(crate) mod dyn_query;
+pub(crate) mod query;
 
 pub use entities::EcsId;
 pub use world::World;
