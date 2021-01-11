@@ -163,6 +163,7 @@ impl<'a> EntityBuilder<'a> {
     /// Adds an entity as a dataless component
     ///
     /// This method will panic if a component with the ID of component_id expects data. Entities by default expect no data.
+    #[must_use]
     pub fn with_dynamic(mut self, component_id: EcsId) -> Self {
         assert!(
             self.world
@@ -184,6 +185,7 @@ impl<'a> EntityBuilder<'a> {
     ///
     ///    data behind ``component`` must not be used again.
     ///    data behind ``component`` must be a valid instance of the type given by ``component_id``
+    #[must_use]
     pub unsafe fn with_dynamic_with_data(
         mut self,
         component: *mut u8,
@@ -217,6 +219,7 @@ impl<'a> EntityBuilder<'a> {
         self
     }
 
+    #[must_use]
     pub fn with<C: 'static>(self, component: C) -> Self {
         let mut component = ManuallyDrop::new(component);
         let component_id = self.world.get_or_create_type_id_ecsid::<C>();
