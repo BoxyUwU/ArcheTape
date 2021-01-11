@@ -63,6 +63,7 @@ pub mod frag_iter_20_padding_20 {
                     A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z
                 )
             );
+
             Benchmark(world)
         }
 
