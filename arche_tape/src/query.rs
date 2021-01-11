@@ -357,19 +357,8 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static T {
     }
 
     fn borrow_storage(archetype: &'guard Archetype, comp_id: Option<EcsId>) -> Self::StorageBorrow {
-        // TODO this has really bad performance when there's lots of components in an archetype
-        // We really should use the .lookup[type_id] for those cases but that really badly affects
-        // perf in cases where there *arent* many components in the archetype... EVENTUALLY we should
-        // just cache the indices we need for a query rendering this all moot
         let storage_idx = archetype.lookup[&comp_id.unwrap()];
         return unsafe { &*archetype.component_storages[storage_idx].1.get() };
-
-        for (n, id) in archetype.comp_ids.iter().enumerate() {
-            if id == &comp_id.unwrap() {
-                return unsafe { &*archetype.component_storages[n].1.get() };
-            }
-        }
-        panic!("Guard not found")
     }
 
     fn acquire_lock(
@@ -432,19 +421,8 @@ unsafe impl<'b, 'guard: 'b, T: 'static> Borrow<'b, 'guard> for &'static mut T {
     }
 
     fn borrow_storage(archetype: &'guard Archetype, comp_id: Option<EcsId>) -> Self::StorageBorrow {
-        // TODO this has really bad performance when there's lots of components in an archetype
-        // We really should use the .lookup[type_id] for those cases but that really badly affects
-        // perf in cases where there *arent* many components in the archetype... EVENTUALLY we should
-        // just cache the indices we need for a query rendering this all moot
         let storage_idx = archetype.lookup[&comp_id.unwrap()];
         return unsafe { &mut *archetype.component_storages[storage_idx].1.get() };
-
-        for (n, id) in archetype.comp_ids.iter().enumerate() {
-            if id == &comp_id.unwrap() {
-                return unsafe { &mut *archetype.component_storages[n].1.get() };
-            }
-        }
-        panic!("Guard not found")
     }
 
     fn acquire_lock(
