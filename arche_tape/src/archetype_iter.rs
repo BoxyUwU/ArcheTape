@@ -66,7 +66,8 @@ mod bitset_iterator {
                 }
 
                 self.bits_remaining -= zeros + 1;
-                self.current_bits >>= zeros + 1;
+                self.current_bits >>= 1;
+                self.current_bits >>= zeros;
                 self.index += zeros as usize + 1;
 
                 if self.index > self.bit_length as usize {

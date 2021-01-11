@@ -51,6 +51,16 @@ impl<'a, const N: usize> Iterator for IntraArchetypeIter<'a, N> {
 
         Some(ptrs)
     }
+
+    fn for_each<F: FnMut(Self::Item)>(self, mut f: F) {
+        let mut ptrs = self.ptrs;
+        for _ in 0..self.remaining {
+            for (ptr, offset) in ptrs.iter_mut().zip(self.offsets.iter()) {
+                unsafe { *ptr = ptr.add(*offset) }
+            }
+            f(ptrs);
+        }
+    }
 }
 
 pub struct QueryIter<'a, I: Iterator<Item = &'a Archetype>, const N: usize> {
@@ -136,7 +146,7 @@ pub struct DynamicQuery<'a, const N: usize> {
 }
 
 impl<'a, const N: usize> DynamicQuery<'a, N> {
-    fn new(world: &'a World, fetches: [FetchType; N]) -> Self {
+    pub(crate) fn new(world: &'a World, fetches: [FetchType; N]) -> Self {
         let mut incomplete = false;
 
         const none: EitherGuard = EitherGuard::None;

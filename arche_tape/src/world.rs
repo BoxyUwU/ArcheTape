@@ -3,6 +3,7 @@ use super::query::{Query, QueryInfos};
 use crate::{
     archetype_iter::{BitsetIterator, Bitsetsss, Bitvec},
     array_vec::ArrayVec,
+    dyn_query::{DynamicQuery, FetchType},
 };
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
@@ -226,7 +227,7 @@ impl ComponentMeta {
         }
     }
 
-    /// Creates a ComponentMeta with the type_id and layout of the generic
+    /// Creates a ComponentMeta with the layout and drop_fn of the generic
     pub fn from_generic<T: 'static>() -> Self {
         Self {
             drop_fn: Some(component_meta_drop_fn::<T>),
@@ -343,6 +344,10 @@ impl World {
 
     pub fn is_alive(&self, entity: EcsId) -> bool {
         self.entities.is_alive(entity)
+    }
+
+    pub fn query_dynamic<const N: usize>(&self, ids: [FetchType; N]) -> DynamicQuery<'_, N> {
+        DynamicQuery::new(self, ids)
     }
 
     pub fn query<T: QueryInfos>(&self) -> Query<T> {
