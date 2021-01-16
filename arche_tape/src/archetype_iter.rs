@@ -66,6 +66,7 @@ mod bitset_iterator {
                 }
 
                 self.bits_remaining -= zeros + 1;
+                // rsh by 64 bits on a u64 is an "error" according to rust so we do this
                 self.current_bits >>= 1;
                 self.current_bits >>= zeros;
                 self.index += zeros as usize + 1;
@@ -106,6 +107,7 @@ impl Bitvec {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn get_bit(&self, index: usize) -> Option<bool> {
         if index >= self.len {
             return None;
@@ -146,6 +148,7 @@ pub struct Bitsetsss {
 
 use crate::EcsId;
 impl Bitsetsss {
+    #[allow(unused)]
     pub(crate) fn new() -> Self {
         Self {
             bitsets: Vec::new(),
@@ -181,6 +184,7 @@ impl Bitsetsss {
         bitvec.set_bit(index, value);
     }
 
+    #[allow(unused)]
     pub(crate) fn push_bit(&mut self, entity: EcsId, value: bool) {
         if entity.uindex() >= self.bitsets.len() {
             self.insert_bitvec(entity);
