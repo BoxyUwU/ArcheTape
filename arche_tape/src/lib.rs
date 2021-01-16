@@ -38,6 +38,7 @@ mod tests {
     mod archetype_iter;
     mod bitset_iterator;
     mod bitsetsss;
+    mod dyn_query;
     mod entities;
     mod query;
     mod world;

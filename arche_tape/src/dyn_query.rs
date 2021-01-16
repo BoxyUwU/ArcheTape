@@ -207,13 +207,12 @@ impl<'a, const N: usize> DynamicQuery<'a, N> {
             self.world.query_archetypes(iters, bit_length)
         } else {
             let identity_fn: fn(_) -> _ = |x| x;
-            let neg_fn: fn(_) -> _ = |x: usize| !x;
 
             let mut bit_length = self.world.entities_bitvec.len as u32;
             let boxed_iters = ecs_ids
                 .iter()
                 .map(|id| match id {
-                    None => (self.world.entities_bitvec.data.iter(), neg_fn),
+                    None => (self.world.entities_bitvec.data.iter(), identity_fn),
                     Some(id) => {
                         let bitvec = self.world.archetype_bitset.get_bitvec(*id).unwrap();
                         if { bitvec.len as u32 } < bit_length {
@@ -238,55 +237,4 @@ impl<'a, const N: usize> DynamicQuery<'a, N> {
             intra_iter: IntraArchetypeIter::unit(),
         }
     }
-}
-
-#[test]
-fn iter() {
-    let mut world = World::new();
-
-    use crate::world::ComponentMeta;
-    let u32_id = unsafe {
-        world
-            .spawn_with_component_meta(ComponentMeta::from_size_align(4, 4))
-            .build()
-    };
-    let u64_id = unsafe {
-        world
-            .spawn_with_component_meta(ComponentMeta::from_size_align(8, 8))
-            .build()
-    };
-
-    let (mut u32_1, mut u32_2, mut u32_3) = (10_u32, 15_u32, 20_u32);
-    let (mut u64_1, mut u64_2, mut u64_3) = (12_u64, 14_u64, 16_u64);
-
-    unsafe {
-        world
-            .spawn()
-            .with_dynamic_with_data({ &mut u32_1 } as *mut u32 as *mut u8, u32_id)
-            .with_dynamic_with_data({ &mut u64_1 } as *mut u64 as *mut u8, u64_id)
-            .build();
-        world
-            .spawn()
-            .with_dynamic_with_data({ &mut u32_2 } as *mut u32 as *mut u8, u32_id)
-            .with_dynamic_with_data({ &mut u64_2 } as *mut u64 as *mut u8, u64_id)
-            .build();
-        world
-            .spawn()
-            .with_dynamic_with_data({ &mut u32_3 } as *mut u32 as *mut u8, u32_id)
-            .with_dynamic_with_data({ &mut u64_3 } as *mut u64 as *mut u8, u64_id)
-            .build();
-    }
-
-    let mut dyn_query =
-        DynamicQuery::new(&world, [FetchType::Mut(u32_id), FetchType::Immut(u64_id)]);
-
-    let mut checks = vec![(10, 12), (15, 14), (20, 16)].into_iter();
-    for [u32_ptr, u64_ptr] in dyn_query.iter() {
-        let check = checks.next().unwrap();
-        unsafe {
-            assert_eq!(*{ u32_ptr as *mut u32 }, check.0);
-            assert_eq!(*{ u64_ptr as *mut u64 }, check.1);
-        };
-    }
-    checks.next().unwrap_none();
 }
