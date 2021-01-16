@@ -1,5 +1,4 @@
 use arche_tape::spawn;
-use criterion::*;
 
 pub mod frag_iter_20_padding_20 {
     use super::spawn;
