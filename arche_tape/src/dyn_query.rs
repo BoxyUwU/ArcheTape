@@ -138,7 +138,7 @@ enum EitherGuard<'a> {
 
 pub struct DynamicQuery<'a, const N: usize> {
     world: &'a World,
-    guards: [EitherGuard<'a>; N],
+    _guards: [EitherGuard<'a>; N],
     fetches: [FetchType; N],
 
     /// If set to true it means that some of the EcsId's used were not alive/existing
@@ -149,8 +149,8 @@ impl<'a, const N: usize> DynamicQuery<'a, N> {
     pub(crate) fn new(world: &'a World, fetches: [FetchType; N]) -> Self {
         let mut incomplete = false;
 
-        const none: EitherGuard = EitherGuard::None;
-        let mut guards = [none; N];
+        const NONE: EitherGuard = EitherGuard::None;
+        let mut guards = [NONE; N];
 
         for (fetch, guard) in fetches.iter().zip(guards.iter_mut()) {
             let ecs_id = match fetch {
@@ -172,23 +172,23 @@ impl<'a, const N: usize> DynamicQuery<'a, N> {
 
         Self {
             world,
-            guards,
+            _guards: guards,
             fetches,
             incomplete,
         }
     }
 
     pub fn iter(&mut self) -> QueryIter<'_, impl Iterator<Item = &'_ Archetype>, N> {
-        const none_id: Option<EcsId> = None;
-        let mut ecs_ids = [none_id; N];
+        const NONE_ID: Option<EcsId> = None;
+        let mut ecs_ids = [NONE_ID; N];
         for (fetch, ecs_id) in self.fetches.iter().zip(ecs_ids.iter_mut()) {
             if let FetchType::Immut(id) | FetchType::Mut(id) = fetch {
                 *ecs_id = Some(*id);
             }
         }
 
-        const default_fn: fn(&Archetype, Option<EcsId>) -> (*mut u8, usize) = |_, _| panic!();
-        let mut create_ptr = [default_fn; N];
+        const DEFAULT_FN: fn(&Archetype, Option<EcsId>) -> (*mut u8, usize) = |_, _| panic!();
+        let mut create_ptr = [DEFAULT_FN; N];
         for (fetch, func) in self.fetches.iter().zip(create_ptr.iter_mut()) {
             *func = fetch.make_create_ptr_fn();
         }
