@@ -13,12 +13,3 @@ readme = "README.md"
 
 [dependencies]
 untyped-vec = { path = "../untyped_vec" }
-
-[dev-dependencies]
-criterion = "0.3"
-cgmath = "0.17"
-
-[[bench]]
-name = "benchmarks"
-path = "../benches/benchmarks.rs"
-harness = false

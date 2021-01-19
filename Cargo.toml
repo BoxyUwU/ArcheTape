@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "benches",
     "arche_tape",
     "untyped_vec",
 ]
