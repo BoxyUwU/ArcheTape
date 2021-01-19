@@ -1,0 +1,14 @@
+[package]
+name = "benches"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+arche-tape = { path = "../arche_tape" }
+criterion = "0.3"
+cgmath = "0.18"
+
+[[bench]]
+name = "benchmarks"
+path = "./benchmarks.rs"
+harness = false
