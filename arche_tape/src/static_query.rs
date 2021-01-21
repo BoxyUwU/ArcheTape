@@ -148,6 +148,7 @@ macro_rules! impl_query_tuple {
             where I: Iterator<Item = &'a Archetype> {
                 type Item = ($(<$T as QueryParam<'a>>::Returns,)*);
 
+                #[allow(unused_assignments)]
                 fn next(&mut self) -> Option<Self::Item> {
                     loop {
                         match self.intra_iter.next() {
@@ -162,32 +163,19 @@ macro_rules! impl_query_tuple {
                                 let archetype = self.archetypes.next()?;
                                 let mut ptrs = [0x0 as *mut u8; $N];
 
-                                for n in 0..$N {
-                                    // Derived from FetchType::make_create_ptr_fn
-                                    let ptr = match &self.fetches[n] {
-                                        Some(FetchType::Immut(id)) => {
-                                            let storage_idx = archetype.lookup[id];
-                                            let storage = unsafe { &*archetype.component_storages[storage_idx].1.get() };
-                                            unsafe { storage.as_immut_ptr() as *mut u8 }
-                                        },
-                                        Some(FetchType::Mut(id)) => {
-                                            let storage_idx = archetype.lookup[id];
-                                            let storage = unsafe { &mut *archetype.component_storages[storage_idx].1.get() };
-                                            unsafe { storage.as_mut_ptr() }
-                                        },
-                                        Some(FetchType::EcsId) => archetype.entities.as_ptr() as *mut EcsId as *mut u8,
-                                        None => unreachable!(),
-                                    };
-
+                                let mut n = 0;
+                                $({
+                                    let fetch = (&self.fetches[n]).as_ref().unwrap();
+                                    let ptr = $T::create_ptr(archetype, fetch);
                                     ptrs[n] = ptr;
-                                }
+                                    n += 1;
+                                })*
 
                                 self.intra_iter = IntraArchetypeIter {
                                     remaining: archetype.entities.len(),
                                     ptrs,
                                     _p: PhantomData,
                                 };
-                                continue;
                             },
                         }
                     }
@@ -243,6 +231,7 @@ pub trait QueryParam<'a> {
     type Returns: 'a;
 
     fn fetch_type(world: &World) -> Option<FetchType>;
+    fn create_ptr(archetype: &Archetype, fetch: &FetchType) -> *mut u8;
     fn next_ptr(ptr: &mut *mut u8);
     fn cast_ptr(ptr: *mut u8) -> Self::Returns;
 }
@@ -255,12 +244,18 @@ impl<'a, T: Component> QueryParam<'a> for &'static mut T {
         Some(FetchType::Mut(id))
     }
 
+    fn create_ptr(archetype: &Archetype, fetch: &FetchType) -> *mut u8 {
+        let storage_idx = archetype.lookup[&fetch.get_id().unwrap()];
+        let storage = unsafe { &mut *archetype.component_storages[storage_idx].1.get() };
+        unsafe { storage.as_mut_ptr() }
+    }
+
     fn next_ptr(ptr: &mut *mut u8) {
         *ptr = unsafe { ((*ptr) as *mut T).add(1) as *mut u8 };
     }
 
     fn cast_ptr(ptr: *mut u8) -> Self::Returns {
-        unsafe { (ptr as *mut T).as_mut().unwrap() }
+        unsafe { &mut *(ptr as *mut T) }
     }
 }
 impl<'a, T: Component> QueryParam<'a> for &'static T {
@@ -271,12 +266,18 @@ impl<'a, T: Component> QueryParam<'a> for &'static T {
         Some(FetchType::Immut(id))
     }
 
+    fn create_ptr(archetype: &Archetype, fetch: &FetchType) -> *mut u8 {
+        let storage_idx = archetype.lookup[&fetch.get_id().unwrap()];
+        let storage = unsafe { &*archetype.component_storages[storage_idx].1.get() };
+        unsafe { storage.as_immut_ptr() as *mut u8 }
+    }
+
     fn next_ptr(ptr: &mut *mut u8) {
         *ptr = unsafe { ((*ptr) as *mut T).add(1) as *mut u8 };
     }
 
     fn cast_ptr(ptr: *mut u8) -> Self::Returns {
-        unsafe { (ptr as *mut T).as_ref().unwrap() }
+        unsafe { &*(ptr as *mut T) }
     }
 }
 
@@ -286,6 +287,10 @@ impl<'a> QueryParam<'a> for EcsIds {
 
     fn fetch_type(_: &World) -> Option<FetchType> {
         Some(FetchType::EcsId)
+    }
+
+    fn create_ptr(archetype: &Archetype, _: &FetchType) -> *mut u8 {
+        archetype.entities.as_ptr() as *mut EcsId as *mut u8
     }
 
     fn next_ptr(ptr: &mut *mut u8) {

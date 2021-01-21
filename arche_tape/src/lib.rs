@@ -27,7 +27,6 @@ pub mod world;
 
 pub(crate) mod array_vec;
 pub(crate) mod dyn_query;
-//pub(crate) mod query;
 pub(crate) mod static_query;
 
 pub use dyn_query::DynamicQuery;

@@ -104,6 +104,13 @@ pub enum FetchType {
 }
 
 impl FetchType {
+    pub(crate) fn get_id(&self) -> Option<EcsId> {
+        Some(match self {
+            &Self::Mut(id) | &Self::Immut(id) => id,
+            Self::EcsId => return None,
+        })
+    }
+
     pub(crate) fn make_create_ptr_fn(&self) -> fn(&Archetype, Option<EcsId>) -> (*mut u8, usize) {
         match self {
             FetchType::EcsId => |archetype, _| {

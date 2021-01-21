@@ -145,9 +145,9 @@ pub mod frag_iter_200 {
         }
 
         pub fn run(&mut self) {
-            self.0.query::<(&mut Data,)>().iter().for_each(|(data,)| {
+            for (data,) in self.0.query::<(&mut Data,)>().iter() {
                 data.0 *= 2.;
-            });
+            }
         }
     }
 }
