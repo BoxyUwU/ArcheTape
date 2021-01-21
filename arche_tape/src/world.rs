@@ -1,8 +1,8 @@
 use super::entities::{EcsId, Entities};
-use super::query::{Query, QueryInfos};
+//use super::query::{Query, QueryInfos};
 use crate::{
-    archetype_iter::{BitsetIterator, Bitsetsss, Bitvec},
     array_vec::ArrayVec,
+    bitset_iterator::{BitsetIterator, Bitsetsss, Bitvec},
     dyn_query::{DynamicQuery, FetchType},
 };
 use std::cell::UnsafeCell;
@@ -350,8 +350,17 @@ impl World {
         DynamicQuery::new(self, ids)
     }
 
-    pub fn query<T: QueryInfos>(&self) -> Query<T> {
-        Query::<T>::new(self)
+    //pub fn query<T: QueryInfos>(&self) -> Query<T> {
+    //    Query::<T>::new(self)
+    //}
+
+    pub fn query<
+        'a,
+        Q: crate::static_query::QueryTuple + crate::static_query::GuardAssocType<'a>,
+    >(
+        &'a self,
+    ) -> crate::StaticQuery<'a, Q> {
+        Q::new(self)
     }
 
     pub fn add_component<T: 'static>(&mut self, entity: EcsId, component: T) {

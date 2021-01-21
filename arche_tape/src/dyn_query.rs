@@ -1,8 +1,6 @@
+use crate::utils::EitherGuard;
 use crate::{world::Archetype, EcsId, World};
-use std::{
-    marker::PhantomData,
-    sync::{RwLockReadGuard, RwLockWriteGuard},
-};
+use std::marker::PhantomData;
 
 struct IntraArchetypeIter<'a, const N: usize> {
     remaining: usize,
@@ -106,7 +104,7 @@ pub enum FetchType {
 }
 
 impl FetchType {
-    fn make_create_ptr_fn(&self) -> fn(&Archetype, Option<EcsId>) -> (*mut u8, usize) {
+    pub(crate) fn make_create_ptr_fn(&self) -> fn(&Archetype, Option<EcsId>) -> (*mut u8, usize) {
         match self {
             FetchType::EcsId => |archetype, _| {
                 (
@@ -128,12 +126,6 @@ impl FetchType {
             },
         }
     }
-}
-
-enum EitherGuard<'a> {
-    Read(RwLockReadGuard<'a, ()>),
-    Write(RwLockWriteGuard<'a, ()>),
-    None,
 }
 
 pub struct DynamicQuery<'a, const N: usize> {

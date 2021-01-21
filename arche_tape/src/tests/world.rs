@@ -61,12 +61,11 @@ pub fn add_component() {
     }
 
     let mut run_times = 0;
-    let query = world.query::<(&u32, &u64)>();
-    query.borrow().for_each_mut(|(left, right)| {
+    for (left, right) in world.query::<(&u32, &u64)>().iter() {
         assert!(*left == 1);
         assert!(*right == 2);
         run_times += 1;
-    });
+    }
     assert!(run_times == 1);
 }
 
@@ -107,11 +106,10 @@ pub fn add_component_then_spawn() {
 
     let mut run_times = 0;
     let mut checks = vec![(1, 2), (3, 4)].into_iter();
-    let query = world.query::<(&u32, &u64)>();
-    query.borrow().for_each_mut(|(left, right)| {
+    for (left, right) in world.query::<(&u32, &u64)>().iter() {
         assert!(checks.next().unwrap() == (*left, *right));
         run_times += 1;
-    });
+    }
     assert!(run_times == 2);
 }
 

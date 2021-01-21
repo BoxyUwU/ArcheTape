@@ -19,23 +19,26 @@ macro_rules! spawn {
     };
 }
 
-mod archetype_iter;
+mod bitset_iterator;
 
 pub mod entities;
 pub mod entity_builder;
 pub mod world;
 
 pub(crate) mod array_vec;
-pub mod dyn_query;
-pub(crate) mod query;
+pub(crate) mod dyn_query;
+//pub(crate) mod query;
+pub(crate) mod static_query;
 
+pub use dyn_query::DynamicQuery;
 pub use dyn_query::FetchType;
 pub use entities::EcsId;
+pub use static_query::EcsIds;
+pub use static_query::StaticQuery;
 pub use world::World;
 
 #[cfg(test)]
 mod tests {
-    mod archetype_iter;
     mod bitset_iterator;
     mod bitsetsss;
     mod dyn_query;
@@ -44,10 +47,16 @@ mod tests {
     mod world;
 }
 
-pub mod utils {
-    use std::convert::TryInto;
-    use std::hash::BuildHasher;
+pub(crate) mod utils {
     use std::hash::Hasher;
+    use std::{convert::TryInto, sync::RwLockReadGuard};
+    use std::{hash::BuildHasher, sync::RwLockWriteGuard};
+
+    pub enum EitherGuard<'a> {
+        Read(RwLockReadGuard<'a, ()>),
+        Write(RwLockWriteGuard<'a, ()>),
+        None,
+    }
 
     #[derive(Default)]
     pub struct TypeIdHasher(u64);
@@ -91,3 +100,6 @@ pub mod utils {
         }
     }
 }
+
+pub trait Component: Send + Sync + 'static {}
+impl<T> Component for T where T: Send + Sync + 'static {}

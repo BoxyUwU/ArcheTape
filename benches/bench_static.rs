@@ -67,7 +67,7 @@ pub mod frag_iter_20_padding_20 {
         }
 
         pub fn run(&mut self) {
-            self.0.query::<(&mut Data,)>().borrow().for_each(|(data,)| {
+            self.0.query::<(&mut Data,)>().iter().for_each(|(data,)| {
                 data.0 *= 2.;
             });
         }
@@ -106,7 +106,7 @@ pub mod frag_iter_2000 {
         }
 
         pub fn run(&mut self) {
-            self.0.query::<(&mut Data,)>().borrow().for_each(|(data,)| {
+            self.0.query::<(&mut Data,)>().iter().for_each(|(data,)| {
                 data.0 *= 2.0;
             });
         }
@@ -145,7 +145,7 @@ pub mod frag_iter_200 {
         }
 
         pub fn run(&mut self) {
-            self.0.query::<(&mut Data,)>().borrow().for_each(|(data,)| {
+            self.0.query::<(&mut Data,)>().iter().for_each(|(data,)| {
                 data.0 *= 2.;
             });
         }
@@ -184,7 +184,7 @@ pub mod frag_iter_20 {
         }
 
         pub fn run(&mut self) {
-            self.0.query::<(&mut Data,)>().borrow().for_each(|(data,)| {
+            self.0.query::<(&mut Data,)>().iter().for_each(|(data,)| {
                 data.0 *= 2.;
             });
         }
@@ -227,7 +227,7 @@ pub mod simple_iter {
         pub fn run(&mut self) {
             self.0
                 .query::<(&mut Position, &mut Velocity)>()
-                .borrow()
+                .iter()
                 .for_each(|(pos, vel)| {
                     pos.0 += vel.0;
                 });
@@ -357,15 +357,15 @@ pub mod simple_large_iter {
         }
 
         pub fn run(&mut self) {
-            let query = self
-                .0
-                .query::<(&mut A, &B, &mut C, &D, &mut E, &F, &mut G, &H)>();
-            query.borrow().for_each(|(a, b, c, d, e, f, g, h)| {
-                a.0 += b.0;
-                c.0 += d.0;
-                e.0 += f.0;
-                g.0 += h.0;
-            });
+            self.0
+                .query::<(&mut A, &B, &mut C, &D, &mut E, &F, &mut G, &H)>()
+                .iter()
+                .for_each(|(a, b, c, d, e, f, g, h)| {
+                    a.0 += b.0;
+                    c.0 += d.0;
+                    e.0 += f.0;
+                    g.0 += h.0;
+                });
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::archetype_iter::Bitsetsss;
+use crate::bitset_iterator::Bitsetsss;
 use crate::EcsId;
 
 #[test]
@@ -68,7 +68,7 @@ fn bitset_iterator() {
 
     let map: fn(_) -> _ = |x| x;
 
-    use crate::archetype_iter::BitsetIterator;
+    use crate::bitset_iterator::BitsetIterator;
     let mut bitset_iter =
         BitsetIterator::new([(bitvec1.data.iter(), map), (bitvec2.data.iter(), map)], 4);
 

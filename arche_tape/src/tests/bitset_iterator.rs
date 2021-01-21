@@ -1,4 +1,4 @@
-use crate::archetype_iter::BitsetIterator;
+use crate::bitset_iterator::BitsetIterator;
 
 #[test]
 fn empty_bitset() {

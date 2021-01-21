@@ -1,6 +1,6 @@
 #![allow(clippy::eval_order_dependence)]
 
-use crate::archetype_iter::{Bitsetsss, Bitvec};
+use crate::bitset_iterator::{Bitsetsss, Bitvec};
 
 use super::entities::{EcsId, Entities};
 use super::world::{Archetype, World};
