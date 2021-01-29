@@ -245,7 +245,7 @@ impl<'a, T: Component> QueryParam<'a> for &'static mut T {
     }
 
     fn create_ptr(archetype: &Archetype, fetch: &FetchType) -> *mut u8 {
-        let storage_idx = archetype.lookup[&fetch.get_id().unwrap()];
+        let storage_idx = archetype.comp_lookup[&fetch.get_id().unwrap()];
         let storage = unsafe { &mut *archetype.component_storages[storage_idx].1.get() };
         unsafe { storage.as_mut_ptr() }
     }
@@ -267,7 +267,7 @@ impl<'a, T: Component> QueryParam<'a> for &'static T {
     }
 
     fn create_ptr(archetype: &Archetype, fetch: &FetchType) -> *mut u8 {
-        let storage_idx = archetype.lookup[&fetch.get_id().unwrap()];
+        let storage_idx = archetype.comp_lookup[&fetch.get_id().unwrap()];
         let storage = unsafe { &*archetype.component_storages[storage_idx].1.get() };
         unsafe { storage.as_immut_ptr() as *mut u8 }
     }

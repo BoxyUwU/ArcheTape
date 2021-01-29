@@ -110,13 +110,13 @@ impl FetchType {
                 )
             },
             FetchType::Immut(_) => |archetype, id| {
-                let storage_idx = archetype.lookup[&id.unwrap()];
+                let storage_idx = archetype.comp_lookup[&id.unwrap()];
                 let storage = unsafe { &*archetype.component_storages[storage_idx].1.get() };
                 let size = storage.get_type_info().layout.size();
                 (unsafe { storage.as_immut_ptr() as *mut u8 }, size)
             },
             FetchType::Mut(_) => |archetype, id| {
-                let storage_idx = archetype.lookup[&id.unwrap()];
+                let storage_idx = archetype.comp_lookup[&id.unwrap()];
                 let storage = unsafe { &mut *archetype.component_storages[storage_idx].1.get() };
                 let size = storage.get_type_info().layout.size();
                 (unsafe { storage.as_mut_ptr() }, size)

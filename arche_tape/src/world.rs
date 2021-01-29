@@ -47,7 +47,7 @@ impl AddRemoveCache {
 }
 pub struct Archetype {
     /// A lookup of a component's TypeId to the index into component_storages/type_ids
-    pub(crate) lookup: HashMap<EcsId, usize, crate::utils::TypeIdHasherBuilder>,
+    pub(crate) comp_lookup: HashMap<EcsId, usize, crate::utils::TypeIdHasherBuilder>,
 
     /// This vec effectively acts like a component strage and as such should have its elements ordered the same as a component in component_storages
     pub(crate) entities: Vec<EcsId>,
@@ -67,7 +67,7 @@ pub struct Archetype {
 impl Archetype {
     pub fn from_archetype(from: &mut Archetype) -> Archetype {
         Archetype {
-            lookup: from.lookup.clone(),
+            comp_lookup: from.comp_lookup.clone(),
             comp_ids: from.comp_ids.clone(),
 
             entities: Vec::new(),
@@ -95,7 +95,7 @@ impl Archetype {
     ) -> Archetype {
         let mut new_archetype = Archetype::from_archetype(from);
 
-        assert!(new_archetype.lookup.get(&with_id).is_none());
+        assert!(new_archetype.comp_lookup.get(&with_id).is_none());
 
         new_archetype.comp_ids.push(with_id);
         new_archetype.component_storages.push((
@@ -117,9 +117,9 @@ impl Archetype {
                 .all(|(id1, id2)| id1 == id2)
         );
 
-        new_archetype.lookup.clear();
+        new_archetype.comp_lookup.clear();
         for (n, &id) in new_archetype.comp_ids.iter().enumerate() {
-            new_archetype.lookup.insert(id, n);
+            new_archetype.comp_lookup.insert(id, n);
         }
 
         new_archetype
@@ -128,9 +128,9 @@ impl Archetype {
     pub fn from_archetype_without(from: &mut Archetype, without_comp_id: EcsId) -> Archetype {
         let mut new_archetype = Archetype::from_archetype(from);
 
-        assert!(new_archetype.lookup.get(&without_comp_id).is_some());
+        assert!(new_archetype.comp_lookup.get(&without_comp_id).is_some());
 
-        let remove_idx = new_archetype.lookup[&without_comp_id];
+        let remove_idx = new_archetype.comp_lookup[&without_comp_id];
         new_archetype.comp_ids.remove(remove_idx);
         new_archetype.component_storages.remove(remove_idx);
 
@@ -148,9 +148,9 @@ impl Archetype {
                 .all(|(id1, id2)| id1 == id2)
         );
 
-        new_archetype.lookup.clear();
+        new_archetype.comp_lookup.clear();
         for (n, &id) in new_archetype.comp_ids.iter().enumerate() {
-            new_archetype.lookup.insert(id, n);
+            new_archetype.comp_lookup.insert(id, n);
         }
 
         new_archetype
@@ -329,7 +329,7 @@ impl World {
 
         // TODO: Remove `entity` component from all entities
         for arch in &self.archetypes {
-            if let Some(_) = arch.lookup.get(&entity) {
+            if let Some(_) = arch.comp_lookup.get(&entity) {
                 todo!();
             }
         }
@@ -380,6 +380,16 @@ impl World {
         assert!(self.entities.is_alive(entity));
         let comp_id = self.get_or_create_type_id_ecsid::<T>();
         self.remove_component_dynamic(entity, comp_id);
+    }
+
+    pub fn has_component<T: 'static>(&self, entity: EcsId) -> bool {
+        let func = || {
+            let comp_id = self.type_id_to_ecs_id.get(&TypeId::of::<T>())?;
+            let ArchIndex(idx) = self.get_entity_meta(entity)?.instance_meta.archetype;
+            Some(self.archetypes[idx].comp_lookup.get(comp_id).is_some())
+        };
+
+        func().unwrap_or(false)
     }
 
     pub fn get_component_mut<T: 'static>(&mut self, entity: EcsId) -> Option<&mut T> {
@@ -858,7 +868,7 @@ impl World {
         };
         let archetype = &mut self.archetypes[archetype_idx.0];
 
-        let component_storage_idx = archetype.lookup[&comp_id];
+        let component_storage_idx = archetype.comp_lookup[&comp_id];
 
         Some(
             archetype.component_storages[component_storage_idx]

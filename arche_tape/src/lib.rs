@@ -100,5 +100,5 @@ pub(crate) mod utils {
     }
 }
 
-pub trait Component: Send + Sync + 'static {}
-impl<T> Component for T where T: Send + Sync + 'static {}
+pub trait Component: 'static {}
+impl<T: 'static> Component for T {}

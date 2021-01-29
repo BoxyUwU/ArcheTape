@@ -6,6 +6,19 @@ mod bench_static;
 pub fn arche_tape(c: &mut Criterion) {
     let mut group = c.benchmark_group("arche_tape");
 
+    group.bench_function("add_remove_10_000", |b| {
+        let mut bench = bench_static::add_remove::Benchmark::new();
+        b.iter(move || bench.run());
+    });
+    group.bench_function("padded_add_remove_10_000", |b| {
+        let mut bench = bench_static::padded_add_remove::Benchmark::new();
+        b.iter(move || bench.run());
+    });
+    group.bench_function("wide_remove_10_000", |b| {
+        let mut bench = bench_static::wide_add_remove::Benchmark::new();
+        b.iter(move || bench.run());
+    });
+
     group.bench_function("static_frag_iter_20_padding_20", |b| {
         let mut bench = bench_static::frag_iter_20_padding_20::Benchmark::new();
         b.iter(move || bench.run());
@@ -66,19 +79,6 @@ pub fn arche_tape(c: &mut Criterion) {
     });
     group.bench_function("frag_insert_10_000_/_26", |b| {
         let mut bench = bench_static::frag_insert::Benchmark::new();
-        b.iter(move || bench.run());
-    });
-
-    group.bench_function("add_remove_10_000", |b| {
-        let mut bench = bench_static::add_remove::Benchmark::new();
-        b.iter(move || bench.run());
-    });
-    group.bench_function("padded_add_remove_10_000", |b| {
-        let mut bench = bench_static::padded_add_remove::Benchmark::new();
-        b.iter(move || bench.run());
-    });
-    group.bench_function("wide_remove_10_000", |b| {
-        let mut bench = bench_static::wide_add_remove::Benchmark::new();
         b.iter(move || bench.run());
     });
 

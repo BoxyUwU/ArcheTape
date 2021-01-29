@@ -68,24 +68,24 @@ fn for_each_multi_archetype_iterator() {
     assert!(checks.next().is_none());
 }
 
-// #[test]
-// fn query_param_in_func() {
-//     let mut world = World::new();
-//     spawn!(&mut world, 10_u32, 12_u64);
-//     let query = world.query::<(&u32, &u64)>();
+#[test]
+fn query_param_in_func() {
+    // let mut world = World::new();
+    // spawn!(&mut world, 10_u32, 12_u64);
+    // let query = world.query::<(&u32, &u64)>();
 
-//     fn func(query: StaticQuery<(&u32, &u64)>) {
-//         let mut ran = false;
-//         query.borrow().for_each_mut(|(left, right)| {
-//             assert!(*left == 10);
-//             assert!(*right == 12);
-//             ran = true;
-//         });
-//         assert!(ran);
-//     }
+    // fn func(query: StaticQuery<(&u32, &u64)>) {
+    //     let mut ran = false;
+    //     query.borrow().for_each_mut(|(left, right)| {
+    //         assert!(*left == 10);
+    //         assert!(*right == 12);
+    //         ran = true;
+    //     });
+    //     assert!(ran);
+    // }
 
-//     func(query);
-// }
+    // func(query);
+}
 
 #[test]
 fn entity_query() {

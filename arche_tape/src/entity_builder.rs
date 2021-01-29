@@ -243,7 +243,7 @@ impl<'a> EntityBuilder<'a> {
                     .clone();
 
                 let archetype = &mut self.world.archetypes[arch_index.0];
-                let comp_storage_index = archetype.lookup[&comp_id];
+                let comp_storage_index = archetype.comp_lookup[&comp_id];
                 unsafe {
                     archetype.component_storages[comp_storage_index]
                         .1
@@ -347,7 +347,7 @@ impl<'a> EntityBuilder<'a> {
 
         Archetype {
             entities: vec![self.entity],
-            lookup,
+            comp_lookup: lookup,
             comp_ids: std::mem::replace(&mut self.comp_ids, Vec::new()),
             component_storages,
             add_remove_cache: AddRemoveCache::new(),
