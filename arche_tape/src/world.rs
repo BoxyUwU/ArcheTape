@@ -1,9 +1,10 @@
 use super::entities::{EcsId, Entities};
-//use super::query::{Query, QueryInfos};
 use crate::{
     array_vec::ArrayVec,
     bitset_iterator::{BitsetIterator, Bitsetsss, Bitvec},
     dyn_query::{DynamicQuery, FetchType},
+    static_query::StaticQuery,
+    Component,
 };
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
@@ -215,7 +216,7 @@ pub struct ComponentMeta {
     pub layout: core::alloc::Layout,
 }
 
-fn component_meta_drop_fn<T: 'static>(ptr: *mut core::mem::MaybeUninit<u8>) {
+fn component_meta_drop_fn<T: Component>(ptr: *mut core::mem::MaybeUninit<u8>) {
     unsafe { core::ptr::drop_in_place::<T>(ptr as *mut T) }
 }
 
@@ -228,7 +229,7 @@ impl ComponentMeta {
     }
 
     /// Creates a ComponentMeta with the layout and drop_fn of the generic
-    pub fn from_generic<T: 'static>() -> Self {
+    pub fn from_generic<T: Component>() -> Self {
         Self {
             drop_fn: Some(component_meta_drop_fn::<T>),
             layout: core::alloc::Layout::new::<T>(),
@@ -350,11 +351,11 @@ impl World {
         DynamicQuery::new(self, ids)
     }
 
-    pub fn query<'a, Q: crate::static_query::QueryTuple>(&'a self) -> crate::StaticQuery<'a, Q> {
+    pub fn query<'a, Q: crate::static_query::QueryTuple>(&'a self) -> StaticQuery<'a, Q> {
         Q::new(self)
     }
 
-    pub fn add_component<T: 'static>(&mut self, entity: EcsId, component: T) {
+    pub fn add_component<T: Component>(&mut self, entity: EcsId, component: T) {
         assert!(self.entities.is_alive(entity));
         let comp_id = self.get_or_create_type_id_ecsid::<T>();
         let mut component = core::mem::ManuallyDrop::new(component);
@@ -367,13 +368,13 @@ impl World {
         }
     }
 
-    pub fn remove_component<T: 'static>(&mut self, entity: EcsId) {
+    pub fn remove_component<T: Component>(&mut self, entity: EcsId) {
         assert!(self.entities.is_alive(entity));
         let comp_id = self.get_or_create_type_id_ecsid::<T>();
         self.remove_component_dynamic(entity, comp_id);
     }
 
-    pub fn has_component<T: 'static>(&self, entity: EcsId) -> bool {
+    pub fn has_component<T: Component>(&self, entity: EcsId) -> bool {
         let func = || {
             let comp_id = self.type_id_to_ecs_id.get(&TypeId::of::<T>())?;
             let ArchIndex(idx) = self.get_entity_meta(entity)?.instance_meta.archetype;
@@ -383,7 +384,7 @@ impl World {
         func().unwrap_or(false)
     }
 
-    pub fn get_component_mut<T: 'static>(&mut self, entity: EcsId) -> Option<&mut T> {
+    pub fn get_component_mut<T: Component>(&mut self, entity: EcsId) -> Option<&mut T> {
         assert!(self.entities.is_alive(entity));
         let comp_id = self.get_or_create_type_id_ecsid::<T>();
         self.get_component_mut_dynamic(entity, comp_id)
@@ -430,7 +431,7 @@ impl World {
         crate::entity_builder::EntityBuilder::new(self, entity, component_meta)
     }
 
-    pub fn get_or_create_type_id_ecsid<T: 'static>(&mut self) -> EcsId {
+    pub fn get_or_create_type_id_ecsid<T: Component>(&mut self) -> EcsId {
         let comp_id = self.type_id_to_ecs_id.get(&TypeId::of::<T>());
         if let Some(comp_id) = comp_id {
             return *comp_id;
@@ -468,7 +469,7 @@ impl World {
         }
     }
 
-    pub fn query_archetypes<'a, Iters>(
+    pub(crate) fn query_archetypes<'a, Iters>(
         &'a self,
         iters: Iters,
         bit_length: u32,
@@ -507,7 +508,7 @@ impl World {
             .map(ArchIndex)
     }
 
-    pub fn find_archetype_dynamic_plus_id(
+    pub(crate) fn find_archetype_dynamic_plus_id(
         &self,
         comp_ids: &[EcsId],
         extra_id: EcsId,
@@ -541,7 +542,7 @@ impl World {
             .next()
     }
 
-    pub fn find_archetype_dynamic_minus_id(
+    pub(crate) fn find_archetype_dynamic_minus_id(
         &self,
         comp_ids: &[EcsId],
         without_id: EcsId,
