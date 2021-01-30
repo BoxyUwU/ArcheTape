@@ -1,9 +1,11 @@
 use crate::{utils::EitherGuard, world::Archetype, Component, EcsId, FetchType, World};
 use std::{any::TypeId, marker::PhantomData};
 
-pub struct StaticQuery<'a, Q: QueryTuple + GuardAssocType<'a>> {
+// If we remove the 'static bound here we are required to manually annotate 'static lifetimes for StaticQuery's in
+// arguments of functions even though QueryTuple has a 'static bound in its trait definition
+pub struct StaticQuery<'a, Q: QueryTuple + 'static> {
     world: &'a World,
-    _guards: Q::Guards,
+    _guards: <Q as GuardAssocType<'a>>::Guards,
     fetches: Q::Fetches,
     // Signifies that some of the EcsIds being fetched do not exist
     incomplete: bool,
@@ -22,22 +24,18 @@ struct IntraArchetypeIter<'a, Q: QueryTuple> {
     _p: PhantomData<(Q, &'a Archetype)>,
 }
 
-pub trait GuardAssocType<'a> {
+pub trait GuardAssocType<'a>: 'static {
     type Guards: 'a;
 }
-pub trait QueryTuple {
+pub trait QueryTuple: Sized + for<'a> GuardAssocType<'a> + 'static {
     type Ptrs: Copy;
     type Fetches;
 
-    fn new<'a>(world: &'a World) -> StaticQuery<'a, Self>
-    where
-        Self: GuardAssocType<'a> + Sized;
+    fn new<'a>(world: &'a World) -> StaticQuery<'a, Self>;
 
     fn iter<'a, 'b>(
         q: &'a mut StaticQuery<'b, Self>,
-    ) -> QueryIter<'a, Self, Box<dyn Iterator<Item = &'a Archetype> + 'a>>
-    where
-        Self: GuardAssocType<'b> + Sized;
+    ) -> QueryIter<'a, Self, Box<dyn Iterator<Item = &'a Archetype> + 'a>>;
 }
 
 macro_rules! impl_query_tuple {
@@ -47,17 +45,13 @@ macro_rules! impl_query_tuple {
             type Ptrs = [*mut u8; $N];
             type Fetches = [Option<crate::FetchType>; $N];
 
-            fn new<'a>(world: &'a World) -> StaticQuery<'a, Self> where Self: GuardAssocType<'a> + Sized {
+            fn new<'a>(world: &'a World) -> StaticQuery<'a, Self> {
                 StaticQuery::<($($T,)*)>::new(world)
             }
 
-            fn iter<'a, 'b>(
-                q: &'a mut StaticQuery<'b, Self>,
-            ) -> QueryIter<'a, Self, Box<dyn Iterator<Item = &'a Archetype> + 'a>>
-            where
-                Self: GuardAssocType<'b> + Sized {
-                    q.iter()
-                }
+            fn iter<'a, 'b>(q: &'a mut StaticQuery<'b, Self>) -> QueryIter<'a, Self, Box<dyn Iterator<Item = &'a Archetype> + 'a>> {
+                q.iter()
+            }
         }
 
         impl<'a, $($T: for<'b> QueryParam<'b>),*> GuardAssocType<'a> for ($($T,)*) {
@@ -227,7 +221,7 @@ impl_query_tuple!(A B C 3);
 impl_query_tuple!(A B 2);
 impl_query_tuple!(A 1);
 
-pub trait QueryParam<'a> {
+pub trait QueryParam<'a>: 'static {
     type Returns: 'a;
 
     fn fetch_type(world: &World) -> Option<FetchType>;

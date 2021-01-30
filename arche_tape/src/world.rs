@@ -350,16 +350,7 @@ impl World {
         DynamicQuery::new(self, ids)
     }
 
-    //pub fn query<T: QueryInfos>(&self) -> Query<T> {
-    //    Query::<T>::new(self)
-    //}
-
-    pub fn query<
-        'a,
-        Q: crate::static_query::QueryTuple + crate::static_query::GuardAssocType<'a>,
-    >(
-        &'a self,
-    ) -> crate::StaticQuery<'a, Q> {
+    pub fn query<'a, Q: crate::static_query::QueryTuple>(&'a self) -> crate::StaticQuery<'a, Q> {
         Q::new(self)
     }
 
