@@ -100,3 +100,20 @@ fn entity_query() {
 
     assert!(checks.next().is_none());
 }
+
+#[test]
+fn query_get() {
+    let mut world = World::new();
+
+    let a = spawn!(&mut world, 41_u32, 9_u64);
+    let b = spawn!(&mut world, 8_u32);
+    let c = spawn!(&mut world, 12_u64);
+    let d = spawn!(&mut world, 1_u32, 128_u64, 28_u128);
+
+    let mut q = world.query::<(&mut u32,)>();
+
+    assert_eq!(q.get(a), Some((&mut 41,)));
+    assert_eq!(q.get(b), Some((&mut 8,)));
+    assert_eq!(q.get(c), None);
+    assert_eq!(q.get(d), Some((&mut 1,)));
+}

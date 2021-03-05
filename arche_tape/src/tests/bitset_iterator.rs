@@ -6,7 +6,7 @@ fn empty_bitset() {
     let data = vec![];
     let mut bitset_iter = BitsetIterator::new([(data.iter(), map)], 0);
 
-    bitset_iter.next().unwrap_none();
+    assert!(matches!(bitset_iter.next(), None));
 }
 
 #[test]
@@ -18,7 +18,7 @@ fn single_bitset() {
     assert_eq!(bitset_iter.next(), Some(0));
     assert_eq!(bitset_iter.next(), Some(1));
     assert_eq!(bitset_iter.next(), Some(3));
-    bitset_iter.next().unwrap_none();
+    assert!(matches!(bitset_iter.next(), None));
 }
 
 #[test]
@@ -29,7 +29,7 @@ fn gapped_bitset() {
 
     assert_eq!(bitset_iter.next(), Some(64));
     assert_eq!(bitset_iter.next(), Some(66));
-    bitset_iter.next().unwrap_none();
+    assert!(matches!(bitset_iter.next(), None));
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn triple_bitset() {
 
     assert_eq!(bitset_iter.next(), Some(1));
     assert_eq!(bitset_iter.next(), Some(5));
-    bitset_iter.next().unwrap_none();
+    assert!(matches!(bitset_iter.next(), None));
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn map_bitset() {
     assert_eq!(bitset_iter.next(), Some(0));
     assert_eq!(bitset_iter.next(), Some(3));
     assert_eq!(bitset_iter.next(), Some(7));
-    bitset_iter.next().unwrap_none();
+    assert!(matches!(bitset_iter.next(), None));
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn all_ones() {
     for n in 0..usize::BITS {
         assert_eq!(bitset_iter.next(), Some(n as _));
     }
-    bitset_iter.next().unwrap_none();
+    assert!(matches!(bitset_iter.next(), None));
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn bit_length() {
     let mut bitset_iter = BitsetIterator::new([(data.iter(), map)], 2);
 
     assert_eq!(bitset_iter.next(), Some(0));
-    bitset_iter.next().unwrap_none();
+    assert!(matches!(bitset_iter.next(), None));
 }
 
 #[test]
@@ -104,7 +104,7 @@ fn long_bit_length() {
         let n = n + 64;
         assert_eq!(bitset_iter.next(), Some(n as _));
     }
-    bitset_iter.next().unwrap_none();
+    assert!(matches!(bitset_iter.next(), None));
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn incorrect_bit_length() {
 
     assert_eq!(bitset_iter.next(), Some(0));
     assert_eq!(bitset_iter.next(), Some(2));
-    bitset_iter.next().unwrap_none();
+    assert!(matches!(bitset_iter.next(), None));
 }
 
 #[test]
@@ -126,15 +126,15 @@ fn returns_none_continuously_incorrect_bit_length() {
 
     assert_eq!(bitset_iter.next(), Some(0));
     assert_eq!(bitset_iter.next(), Some(2));
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
 }
 
 #[test]
@@ -145,15 +145,15 @@ fn returns_none_continuously_bit_length() {
 
     assert_eq!(bitset_iter.next(), Some(0));
     assert_eq!(bitset_iter.next(), Some(2));
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
 }
 
 #[test]
@@ -167,13 +167,13 @@ fn returns_none_continuously() {
         assert_eq!(bitset_iter.next(), Some(n as _));
     }
 
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
-    bitset_iter.next().unwrap_none();
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
+    assert!(matches!(bitset_iter.next(), None));
 }

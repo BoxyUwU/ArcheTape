@@ -1,10 +1,5 @@
 #![allow(clippy::bool_comparison)]
-#![feature(
-    unsafe_block_in_unsafe_fn,
-    exact_size_is_empty,
-    int_bits_const,
-    option_unwrap_none
-)]
+#![feature(unsafe_block_in_unsafe_fn, exact_size_is_empty, int_bits_const)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 #[macro_export]

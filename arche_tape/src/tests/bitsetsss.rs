@@ -73,7 +73,7 @@ fn bitset_iterator() {
         BitsetIterator::new([(bitvec1.data.iter(), map), (bitvec2.data.iter(), map)], 4);
 
     assert_eq!(bitset_iter.next(), Some(2));
-    bitset_iter.next().unwrap_none();
+    assert!(matches!(bitset_iter.next(), None));
 }
 
 #[test]
@@ -86,7 +86,8 @@ fn empty_push_bit() {
 
     let bitvec = bitsets.get_bitvec(key).unwrap();
     assert!(bitvec.get_bit(0).unwrap() == true);
-    bitvec.get_bit(1).unwrap_none();
+
+    assert!(matches!(bitvec.get_bit(1), None));
 }
 
 #[test]
@@ -100,7 +101,8 @@ fn push_bit() {
 
     let bitvec = bitsets.get_bitvec(key).unwrap();
     assert!(bitvec.get_bit(4).unwrap() == true);
-    bitvec.get_bit(5).unwrap_none();
+
+    assert!(matches!(bitvec.get_bit(5), None));
 }
 
 #[test]
@@ -114,5 +116,5 @@ fn push_bit_segmented() {
 
     let bitvec = bitsets.get_bitvec(key).unwrap();
     assert!(bitvec.get_bit(64).unwrap() == true);
-    bitvec.get_bit(65).unwrap_none();
+    assert!(matches!(bitvec.get_bit(65), None));
 }

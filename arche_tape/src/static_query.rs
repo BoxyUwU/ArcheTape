@@ -36,6 +36,8 @@ pub trait QueryTuple: Sized + for<'a> GuardAssocType<'a> + 'static {
     fn iter<'a, 'b>(
         q: &'a mut StaticQuery<'b, Self>,
     ) -> QueryIter<'a, Self, Box<dyn Iterator<Item = &'a Archetype> + 'a>>;
+
+    fn get(world: &World, entity: EcsId) -> Option<Self::Ptrs>;
 }
 
 macro_rules! impl_query_tuple {
@@ -51,6 +53,29 @@ macro_rules! impl_query_tuple {
 
             fn iter<'a, 'b>(q: &'a mut StaticQuery<'b, Self>) -> QueryIter<'a, Self, Box<dyn Iterator<Item = &'a Archetype> + 'a>> {
                 q.iter()
+            }
+
+            fn get(world: &World, entity: EcsId) -> Option<Self::Ptrs> {
+                let meta = world.get_entity_meta(entity)?.instance_meta.clone();
+                let archetype = &world.archetypes[meta.archetype.0];
+
+                match meta.index < archetype.entities.len() {
+                    true => {
+                        let mut n = 0;
+                        Some([
+                            $(
+                                unsafe {
+                                    let mut ptr = $T::create_ptr(archetype, &$T::fetch_type(world)?)?;
+                                    $T::offset_ptr(&mut ptr, meta.index);
+                                    ptr
+                                },
+                            )*
+                        ])
+                    }
+                    false => {
+                        None
+                    }
+                }
             }
         }
 
@@ -93,6 +118,11 @@ macro_rules! impl_query_tuple {
                     incomplete,
                     _p: PhantomData,
                 }
+            }
+
+            pub fn get(&mut self, entity: EcsId) -> Option<($(<$T as QueryParam<'_>>::Returns,)*)> {
+                let [$($T,)*] = <($($T,)*)>::get(&self.world, entity)?;
+                Some(($($T::cast_ptr($T),)*))
             }
 
             pub fn iter(&mut self) -> QueryIter<($($T,)*), Box<dyn Iterator<Item = &Archetype> + '_>> {
@@ -160,7 +190,7 @@ macro_rules! impl_query_tuple {
                                 let mut n = 0;
                                 $({
                                     let fetch = (&self.fetches[n]).as_ref().unwrap();
-                                    let ptr = $T::create_ptr(archetype, fetch);
+                                    let ptr = $T::create_ptr(archetype, fetch).unwrap();
                                     ptrs[n] = ptr;
                                     n += 1;
                                 })*
@@ -200,7 +230,7 @@ macro_rules! impl_query_tuple {
 
                 let mut n = 0;
                 $(
-                    $T::next_ptr(&mut self.ptrs[n]);
+                    $T::offset_ptr(&mut self.ptrs[n], 1);
                     n += 1;
                 )*
 
@@ -225,8 +255,8 @@ pub trait QueryParam<'a>: 'static {
     type Returns: 'a;
 
     fn fetch_type(world: &World) -> Option<FetchType>;
-    fn create_ptr(archetype: &Archetype, fetch: &FetchType) -> *mut u8;
-    fn next_ptr(ptr: &mut *mut u8);
+    fn create_ptr(archetype: &Archetype, fetch: &FetchType) -> Option<*mut u8>;
+    fn offset_ptr(ptr: &mut *mut u8, elements: usize);
     fn cast_ptr(ptr: *mut u8) -> Self::Returns;
 }
 
@@ -238,14 +268,14 @@ impl<'a, T: Component> QueryParam<'a> for &'static mut T {
         Some(FetchType::Mut(id))
     }
 
-    fn create_ptr(archetype: &Archetype, fetch: &FetchType) -> *mut u8 {
-        let storage_idx = archetype.comp_lookup[&fetch.get_id().unwrap()];
+    fn create_ptr(archetype: &Archetype, fetch: &FetchType) -> Option<*mut u8> {
+        let &storage_idx = archetype.comp_lookup.get(&fetch.get_id().unwrap())?;
         let storage = unsafe { &mut *archetype.component_storages[storage_idx].1.get() };
-        unsafe { storage.as_mut_ptr() }
+        unsafe { Some(storage.as_mut_ptr()) }
     }
 
-    fn next_ptr(ptr: &mut *mut u8) {
-        *ptr = unsafe { ((*ptr) as *mut T).add(1) as *mut u8 };
+    fn offset_ptr(ptr: &mut *mut u8, elements: usize) {
+        *ptr = unsafe { ((*ptr) as *mut T).add(elements) as *mut u8 };
     }
 
     fn cast_ptr(ptr: *mut u8) -> Self::Returns {
@@ -260,14 +290,14 @@ impl<'a, T: Component> QueryParam<'a> for &'static T {
         Some(FetchType::Immut(id))
     }
 
-    fn create_ptr(archetype: &Archetype, fetch: &FetchType) -> *mut u8 {
-        let storage_idx = archetype.comp_lookup[&fetch.get_id().unwrap()];
+    fn create_ptr(archetype: &Archetype, fetch: &FetchType) -> Option<*mut u8> {
+        let &storage_idx = archetype.comp_lookup.get(&fetch.get_id().unwrap())?;
         let storage = unsafe { &*archetype.component_storages[storage_idx].1.get() };
-        unsafe { storage.as_immut_ptr() as *mut u8 }
+        unsafe { Some(storage.as_immut_ptr() as *mut u8) }
     }
 
-    fn next_ptr(ptr: &mut *mut u8) {
-        *ptr = unsafe { ((*ptr) as *mut T).add(1) as *mut u8 };
+    fn offset_ptr(ptr: &mut *mut u8, elements: usize) {
+        *ptr = unsafe { ((*ptr) as *mut T).add(elements) as *mut u8 };
     }
 
     fn cast_ptr(ptr: *mut u8) -> Self::Returns {
@@ -283,12 +313,12 @@ impl<'a> QueryParam<'a> for EcsIds {
         Some(FetchType::EcsId)
     }
 
-    fn create_ptr(archetype: &Archetype, _: &FetchType) -> *mut u8 {
-        archetype.entities.as_ptr() as *mut EcsId as *mut u8
+    fn create_ptr(archetype: &Archetype, _: &FetchType) -> Option<*mut u8> {
+        Some(archetype.entities.as_ptr() as *mut EcsId as *mut u8)
     }
 
-    fn next_ptr(ptr: &mut *mut u8) {
-        *ptr = unsafe { ((*ptr) as *mut EcsId).add(1) as *mut u8 };
+    fn offset_ptr(ptr: &mut *mut u8, elements: usize) {
+        *ptr = unsafe { ((*ptr) as *mut EcsId).add(elements) as *mut u8 };
     }
 
     fn cast_ptr(ptr: *mut u8) -> Self::Returns {
