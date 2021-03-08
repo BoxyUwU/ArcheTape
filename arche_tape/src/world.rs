@@ -397,13 +397,6 @@ impl World {
         func().unwrap_or(false)
     }
 
-    pub fn get_component_mut<T: Component>(&mut self, entity: EcsId) -> Option<&mut T> {
-        assert!(self.entities.is_alive(entity));
-        let comp_id = self.get_or_create_type_id_ecsid::<T>();
-        self.get_component_mut_dynamic(entity, comp_id)
-            .map(|ptr| unsafe { &mut *{ ptr.cast::<T>() } })
-    }
-
     /// Adds an entity as a dataless component
     ///
     /// This method will panic if a component with the ID of component_id expects data. Entities by default expect no data.

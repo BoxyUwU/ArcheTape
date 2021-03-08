@@ -526,8 +526,9 @@ pub mod get {
         }
 
         pub fn run(&mut self) {
+            let mut q = self.0.query::<(&mut A,)>();
             for &entity in self.1.iter() {
-                let a = self.0.get_component_mut::<A>(entity);
+                let (a,) = q.get(entity).unwrap();
                 criterion::black_box(a);
             }
         }
@@ -566,8 +567,9 @@ pub mod padded_get {
         }
 
         pub fn run(&mut self) {
+            let mut q = self.0.query::<(&mut Data,)>();
             for &entity in self.1.iter() {
-                let data: &mut Data = self.0.get_component_mut(entity).unwrap();
+                let (data,) = q.get(entity).unwrap();
                 criterion::black_box(data);
             }
         }

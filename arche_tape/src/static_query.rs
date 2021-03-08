@@ -6,14 +6,12 @@ use std::{any::TypeId, marker::PhantomData};
 pub struct StaticQuery<'a, Q: QueryTuple + 'static> {
     world: &'a World,
     _guards: <Q as QueryTupleGATs<'a>>::Guards,
-    fetches: Q::Fetches,
-    // Signifies that some of the EcsIds being fetched do not exist
-    incomplete: bool,
+    fetches: Option<Q::Fetches>,
     _p: PhantomData<Q>,
 }
 
 pub struct StaticQueryIter<'a, Q: QueryTuple + 'static> {
-    fetches: &'a Q::Fetches,
+    fetches: Option<&'a Q::Fetches>,
     archetypes: <Q as QueryTupleGATs<'a>>::ArchetypeIter,
     intra_iter: IntraArchetypeIter<'a, Q>,
 }
@@ -33,45 +31,16 @@ pub trait QueryTuple: Sized + for<'a> QueryTupleGATs<'a> + 'static {
     type Fetches;
 
     fn new(world: &World) -> StaticQuery<Self>;
-
-    fn iter<'a, 'b>(q: &'a mut StaticQuery<'b, Self>) -> StaticQueryIter<'a, Self>;
-
-    fn get(world: &World, entity: EcsId) -> Option<Self::Ptrs>;
 }
 
 macro_rules! impl_query_tuple {
     ($($T:ident)* $N:literal) => {
-        #[allow(unused, non_snake_case)]
         impl<$($T: for<'a> QueryParam<'a>),*> QueryTuple for ($($T,)*) {
             type Ptrs = [*mut u8; $N];
-            type Fetches = [Option<crate::FetchType>; $N];
+            type Fetches = [crate::FetchType; $N];
 
             fn new(world: &World) -> StaticQuery<Self> {
                 StaticQuery::<($($T,)*)>::new(world)
-            }
-
-            fn iter<'a, 'b>(q: &'a mut StaticQuery<'b, Self>) -> StaticQueryIter<'a, Self> {
-                q.iter()
-            }
-
-            fn get(world: &World, entity: EcsId) -> Option<Self::Ptrs> {
-                let meta = world.get_entity_meta(entity)?.instance_meta.clone();
-                let archetype = &world.archetypes[meta.archetype.0];
-
-                Some(match meta.index < archetype.entities.len() {
-                    true => {
-                        [$(
-                            unsafe {
-                                let mut ptr = $T::create_ptr(archetype, &$T::fetch_type(world)?)?;
-                                $T::offset_ptr(&mut ptr, meta.index);
-                                ptr
-                            },
-                        )*]
-                    }
-                    false => {
-                        return None;
-                    }
-                })
             }
         }
 
@@ -81,85 +50,91 @@ macro_rules! impl_query_tuple {
         }
 
         impl<'a, $($T: for<'b> QueryParam<'b>,)*> StaticQuery<'a, ($($T,)*)> {
+            #[allow(non_snake_case)]
             pub(crate) fn new(world: &'a World) -> Self {
-                let mut incomplete = false;
-                let fetches = [$(
-                    $T::fetch_type(world),
-                )*];
+                let fetches = (|| {
+                    Some([$(
+                        $T::fetch_type(world)?,
+                    )*])
+                })();
 
-                if let Some(_) = fetches.iter().find(|f| f.is_none()) {
-                    incomplete = true;
-                }
-
-                let guards: [EitherGuard; $N] = if incomplete == false {
-                    let guards = fetches.iter().map(|f| match f {
-                        Some(FetchType::Mut(id)) => EitherGuard::Write(world.locks[world.lock_lookup[id]].write().unwrap()),
-                        Some(FetchType::Immut(id)) => EitherGuard::Read(world.locks[world.lock_lookup[id]].read().unwrap()),
-                        Some(FetchType::EcsId) => EitherGuard::None,
-                        None => EitherGuard::None,
-                    }).collect::<Box<[EitherGuard]>>();
-
-                    match std::convert::TryInto::<Box<[EitherGuard; $N]>>::try_into(guards) {
-                        Ok(boxed) => *boxed,
-                        Err(_) => unreachable!(),
+                let guards = match &fetches {
+                    Some([$($T,)*]) => {
+                        [$(
+                            match $T {
+                                FetchType::Mut(id) => EitherGuard::Write(world.locks[world.lock_lookup[id]].write().unwrap()),
+                                FetchType::Immut(id) => EitherGuard::Read(world.locks[world.lock_lookup[id]].read().unwrap()),
+                                FetchType::EcsId => EitherGuard::None,
+                            },
+                        )*]
                     }
-                } else {
-                    const NONE: EitherGuard = EitherGuard::None;
-                    [NONE; $N]
+                    None => {
+                        const NONE_GUARD: EitherGuard = EitherGuard::None;
+                        [NONE_GUARD; $N]
+                    }
                 };
 
                 Self {
-                    _guards: guards,
                     fetches,
                     world,
-                    incomplete,
+
+                    _guards: guards,
                     _p: PhantomData,
                 }
             }
 
             #[allow(non_snake_case)]
             pub fn get(&mut self, entity: EcsId) -> Option<($(<$T as QueryParam<'_>>::Returns,)*)> {
-                let [$($T,)*] = <($($T,)*)>::get(&self.world, entity)?;
+                if !self.world.is_alive(entity) {
+                    return None;
+                }
+                let meta = self.world.get_entity_meta(entity)?.instance_meta.clone();
+                let archetype = &self.world.archetypes[meta.archetype.0];
+
+                assert!(meta.index < archetype.entities.len());
+
+                let [$($T,)*] = self.fetches.as_ref()?;
+                let [$(mut $T,)*] = [$($T::create_ptr(archetype, $T)?,)*];
+                $(
+                    $T::offset_ptr(&mut $T, meta.index);
+                )*
                 Some(($($T::cast_ptr($T),)*))
             }
 
+            #[allow(unused_variables, non_snake_case)]
             pub fn iter(&mut self) -> StaticQueryIter<($($T,)*)> {
-                let archetype_iter = if self.incomplete {
-                    let identity: fn(_) -> _ = |x| x;
-                    use std::convert::TryInto;
-                    let iters: Box<[_; $N]> = vec![(self.world.entities_bitvec.data.iter(), identity); $N].into_boxed_slice().try_into().unwrap();
-                    let iters = *iters;
-                    self.world.query_archetypes(iters, 0)
-                } else {
-                    let identity_fn: fn(_) -> _ = |x| x;
-
-                    let mut bit_length = self.world.entities_bitvec.len as u32;
-                    let boxed_iters = self.fetches
-                        .iter()
-                        .map(|f| match f {
-                            Some(FetchType::EcsId) => {
-                                (self.world.entities_bitvec.data.iter(), identity_fn)
-                            }
-                            Some(FetchType::Immut(id)) | Some(FetchType::Mut(id)) => {
-                                let bitvec = self.world.archetype_bitset.get_bitvec(*id).unwrap();
-                                if (bitvec.len as u32) < bit_length {
-                                    bit_length = bitvec.len as u32;
+                let identity: fn(_) -> _ = |x| x;
+                let archetype_iter: crate::world::ArchetypeIter<$N> = match &self.fetches {
+                    Some([$($T,)*]) => {
+                        let mut bitlength = self.world.entities_bitvec.len as u32;
+                        let iters = [$(
+                            match $T {
+                                FetchType::EcsId => {
+                                    (self.world.entities_bitvec.data.iter(), identity)
                                 }
-
-                                (bitvec.data.iter(), identity_fn)
-                            }
-                            None => unreachable!(),
-                        })
-                        .collect::<Box<[_]>>();
-                    use std::convert::TryInto;
-                    let iters: Box<[_; $N]> = boxed_iters.try_into().unwrap();
-                    let iters = *iters;
-
-                    self.world.query_archetypes(iters, bit_length)
+                                FetchType::Immut(id) | FetchType::Mut(id) => {
+                                    let bitvec = self.world.archetype_bitset.get_bitvec(*id).unwrap();
+                                    bitlength = u32::min(bitlength, bitvec.len as u32);
+                                    (bitvec.data.iter(), identity)
+                                }
+                            },
+                        )*];
+                        self.world.query_archetypes(iters, bitlength)
+                    }
+                    None => {
+                        let iters: [_; $N] =
+                            [$(
+                                ({
+                                    let $T = ();
+                                    self.world.entities_bitvec.data.iter()
+                                }, identity ),
+                            )*];
+                        self.world.query_archetypes(iters, 0)
+                    }
                 };
 
                 StaticQueryIter {
-                    fetches: &self.fetches,
+                    fetches: self.fetches.as_ref(),
                     archetypes: archetype_iter,
                     intra_iter: IntraArchetypeIter::<($($T,)*)>::unit(),
                 }
@@ -169,8 +144,7 @@ macro_rules! impl_query_tuple {
         impl<'a, $($T: for<'b> QueryParam<'b>,)*> Iterator for StaticQueryIter<'a, ($($T,)*)> {
                 type Item = ($(<$T as QueryParam<'a>>::Returns,)*);
 
-                #[allow(non_snake_case)]
-                #[allow(unused_assignments)]
+                #[allow(non_snake_case, unused_assignments)]
                 #[inline(always)]
                 fn next(&mut self) -> Option<Self::Item> {
                     loop {
@@ -184,9 +158,10 @@ macro_rules! impl_query_tuple {
                                 let archetype = self.archetypes.next()?;
                                 let mut ptrs = [0x0 as *mut u8; $N];
 
+                                let fetches = self.fetches.as_ref().unwrap();
                                 let mut n = 0;
                                 $({
-                                    let fetch = (&self.fetches[n]).as_ref().unwrap();
+                                    let fetch = &fetches[n];
                                     let ptr = $T::create_ptr(archetype, fetch).unwrap();
                                     ptrs[n] = ptr;
                                     n += 1;

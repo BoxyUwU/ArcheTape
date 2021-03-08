@@ -7,10 +7,12 @@ pub fn get() {
     let entity = spawn!(&mut world, 10_u32, 12_u64, "Hello");
     let entity2 = spawn!(&mut world, 18_u32, "AWDAWDAWD", 16.0f32);
 
-    let str_comp: &mut &str = world.get_component_mut(entity).unwrap();
+    let mut q = world.query::<(&mut &str,)>();
+
+    let (str_comp,): (&mut &str,) = q.get(entity).unwrap();
     assert!(*str_comp == "Hello");
 
-    let str_comp: &mut &str = world.get_component_mut(entity2).unwrap();
+    let (str_comp,): (&mut &str,) = q.get(entity2).unwrap();
     assert!(*str_comp == "AWDAWDAWD");
 }
 
@@ -204,8 +206,9 @@ pub fn despawn_meta_update() {
     assert!(world.is_alive(e2));
     assert!(world.is_alive(e3));
 
-    assert!(*world.get_component_mut::<u32>(e2).unwrap() == 12);
-    assert!(*world.get_component_mut::<u32>(e3).unwrap() == 14);
+    let mut q = world.query::<(&mut u32,)>();
+    assert_eq!(q.get(e2).unwrap(), (&mut 12,));
+    assert_eq!(q.get(e3).unwrap(), (&mut 14,));
 }
 
 #[test]
