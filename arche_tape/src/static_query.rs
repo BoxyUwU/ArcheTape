@@ -32,7 +32,7 @@ pub trait QueryTuple: Sized + for<'a> QueryTupleGATs<'a> + 'static {
     type Ptrs: Copy;
     type Fetches;
 
-    fn new<'a>(world: &'a World) -> StaticQuery<'a, Self>;
+    fn new(world: &World) -> StaticQuery<Self>;
 
     fn iter<'a, 'b>(q: &'a mut StaticQuery<'b, Self>) -> StaticQueryIter<'a, Self>;
 
@@ -46,7 +46,7 @@ macro_rules! impl_query_tuple {
             type Ptrs = [*mut u8; $N];
             type Fetches = [Option<crate::FetchType>; $N];
 
-            fn new<'a>(world: &'a World) -> StaticQuery<'a, Self> {
+            fn new(world: &World) -> StaticQuery<Self> {
                 StaticQuery::<($($T,)*)>::new(world)
             }
 

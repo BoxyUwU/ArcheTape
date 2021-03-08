@@ -117,3 +117,10 @@ fn query_get() {
     assert_eq!(q.get(c), None);
     assert_eq!(q.get(d), Some((&mut 1,)));
 }
+
+#[test]
+fn non_present_component_query() {
+    let world = World::new();
+    world.query::<(&mut u32,)>().iter().for_each(|_| panic!());
+    world.query::<(&u32,)>().iter().for_each(|_| panic!());
+}

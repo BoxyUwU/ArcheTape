@@ -203,3 +203,18 @@ fn entity_query() {
         assert!(checks.next().is_none());
     }
 }
+
+#[test]
+fn non_present_component_query() {
+    let mut other_world = World::new();
+    let c_id = other_world.spawn().build();
+    let world = World::new();
+    world
+        .query_dynamic([FetchType::Mut(c_id)])
+        .iter()
+        .for_each(|_| panic!());
+    world
+        .query_dynamic([FetchType::Immut(c_id)])
+        .iter()
+        .for_each(|_| panic!());
+}

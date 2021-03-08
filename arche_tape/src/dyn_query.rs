@@ -51,6 +51,30 @@ impl<'a, const N: usize> Iterator for IntraArchetypeIter<'a, N> {
     }
 }
 
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct PtrLen(*mut u8, usize);
+
+pub struct DynQueryColumnIter<'a, const N: usize> {
+    comp_ids: [Option<EcsId>; N],
+    create_ptr: [fn(&Archetype, Option<EcsId>) -> (*mut u8, usize); N],
+    archetype_iter: crate::world::ArchetypeIter<'a, N>,
+}
+
+impl<'a, const N: usize> Iterator for DynQueryColumnIter<'a, N> {
+    type Item = [PtrLen; N];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let archetype = self.archetype_iter.next()?;
+        let mut ptrs = [PtrLen(0x0 as _, archetype.entities.len()); N];
+        for n in 0..N {
+            let (ptr, _) = self.create_ptr[n](archetype, self.comp_ids[n]);
+            ptrs[n].0 = ptr;
+        }
+        Some(ptrs)
+    }
+}
+
 pub struct DynQueryIter<'a, const N: usize> {
     comp_ids: [Option<EcsId>; N],
     create_ptr: [fn(&Archetype, Option<EcsId>) -> (*mut u8, usize); N],
@@ -161,6 +185,65 @@ impl<'a, const N: usize> DynQuery<'a, N> {
             _guards: guards,
             fetches,
             incomplete,
+        }
+    }
+
+    pub fn column_iter(&mut self) -> DynQueryColumnIter<'_, N> {
+        const NONE_ID: Option<EcsId> = None;
+        let mut ecs_ids = [NONE_ID; N];
+        for (fetch, ecs_id) in self.fetches.iter().zip(ecs_ids.iter_mut()) {
+            if let FetchType::Immut(id) | FetchType::Mut(id) = fetch {
+                *ecs_id = Some(*id);
+            }
+        }
+
+        const DEFAULT_FN: fn(&Archetype, Option<EcsId>) -> (*mut u8, usize) = |_, _| panic!();
+        let mut create_ptr = [DEFAULT_FN; N];
+        for (fetch, func) in self.fetches.iter().zip(create_ptr.iter_mut()) {
+            *func = fetch.make_create_ptr_fn();
+        }
+
+        let archetype_iter = if self.incomplete {
+            let bit_length = 0;
+            let neg_fn: fn(_) -> _ = |x: usize| !x;
+
+            use std::convert::TryInto;
+            let iters: Box<[_; N]> = vec![(self.world.entities_bitvec.data.iter(), neg_fn); N]
+                .into_boxed_slice()
+                .try_into()
+                .unwrap();
+            let iters = *iters;
+
+            self.world.query_archetypes(iters, bit_length)
+        } else {
+            let identity_fn: fn(_) -> _ = |x| x;
+
+            let mut bit_length = self.world.entities_bitvec.len as u32;
+            let boxed_iters = ecs_ids
+                .iter()
+                .map(|id| match id {
+                    None => (self.world.entities_bitvec.data.iter(), identity_fn),
+                    Some(id) => {
+                        let bitvec = self.world.archetype_bitset.get_bitvec(*id).unwrap();
+                        if { bitvec.len as u32 } < bit_length {
+                            bit_length = bitvec.len as u32;
+                        }
+
+                        (bitvec.data.iter(), identity_fn)
+                    }
+                })
+                .collect::<Box<[_]>>();
+            use std::convert::TryInto;
+            let iters: Box<[_; N]> = boxed_iters.try_into().unwrap();
+            let iters = *iters;
+
+            self.world.query_archetypes(iters, bit_length)
+        };
+
+        DynQueryColumnIter {
+            comp_ids: ecs_ids,
+            create_ptr,
+            archetype_iter,
         }
     }
 
