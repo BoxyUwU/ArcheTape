@@ -2,15 +2,28 @@ use super::entities::{EcsId, Entities};
 use crate::{
     array_vec::ArrayVec,
     bitset_iterator::{BitsetIterator, Bitsetsss, Bitvec},
-    dyn_query::{DynamicQuery, FetchType},
+    dyn_query::{DynQuery, FetchType},
     static_query::StaticQuery,
     Component,
 };
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::sync::RwLock;
-use std::{any::TypeId, borrow::BorrowMut, slice::Iter};
+use std::{any::TypeId, slice::Iter};
 use untyped_vec::UntypedVec;
+
+pub struct ArchetypeIter<'a, const N: usize> {
+    archetypes: &'a [Archetype],
+    iter: BitsetIterator<'a, [(Iter<'a, usize>, fn(usize) -> usize); N]>,
+}
+
+impl<'a, const N: usize> Iterator for ArchetypeIter<'a, N> {
+    type Item = &'a Archetype;
+
+    fn next(&mut self) -> Option<&'a Archetype> {
+        self.iter.next().map(|idx| &self.archetypes[idx])
+    }
+}
 
 const CACHE_SIZE: usize = 4;
 pub struct AddRemoveCache {
@@ -347,8 +360,8 @@ impl World {
         self.entities.is_alive(entity)
     }
 
-    pub fn query_dynamic<const N: usize>(&self, ids: [FetchType; N]) -> DynamicQuery<'_, N> {
-        DynamicQuery::new(self, ids)
+    pub fn query_dynamic<const N: usize>(&self, ids: [FetchType; N]) -> DynQuery<'_, N> {
+        DynQuery::new(self, ids)
     }
 
     pub fn query<'a, Q: crate::static_query::QueryTuple>(&'a self) -> StaticQuery<'a, Q> {
@@ -469,15 +482,15 @@ impl World {
         }
     }
 
-    pub(crate) fn query_archetypes<'a, Iters>(
+    pub(crate) fn query_archetypes<'a, const N: usize>(
         &'a self,
-        iters: Iters,
+        iters: [(Iter<'a, usize>, fn(usize) -> usize); N],
         bit_length: u32,
-    ) -> impl Iterator<Item = &'a Archetype> + 'a
-    where
-        Iters: BorrowMut<[(Iter<'a, usize>, fn(usize) -> usize)]> + 'a,
-    {
-        BitsetIterator::new(iters, bit_length).map(move |idx| &self.archetypes[idx])
+    ) -> ArchetypeIter<'a, N> {
+        ArchetypeIter {
+            archetypes: &self.archetypes,
+            iter: BitsetIterator::new(iters, bit_length),
+        }
     }
 
     pub(crate) fn find_archetype_dynamic(&mut self, comp_ids: &[EcsId]) -> Option<ArchIndex> {

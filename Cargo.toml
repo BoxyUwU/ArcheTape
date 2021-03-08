@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "playground",
     "benches",
     "arche_tape",
     "untyped_vec",
@@ -10,6 +11,7 @@ opt-level = 3
 codegen-units = 1
 lto = "thin"
 debug = true
+panic = "abort"
 
 [profile.release]
 opt-level = 3

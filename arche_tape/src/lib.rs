@@ -24,7 +24,7 @@ pub(crate) mod array_vec;
 pub(crate) mod dyn_query;
 pub(crate) mod static_query;
 
-pub use dyn_query::DynamicQuery;
+pub use dyn_query::DynQuery;
 pub use dyn_query::FetchType;
 pub use entities::EcsId;
 pub use static_query::EcsIds;

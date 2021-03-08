@@ -1,5 +1,5 @@
 use crate::World;
-use crate::{dyn_query::DynamicQuery, world::ComponentMeta};
+use crate::{dyn_query::DynQuery, world::ComponentMeta};
 use crate::{EcsId, FetchType};
 
 #[test]
@@ -155,7 +155,7 @@ fn query_param_in_func() {
     let comp_id = world.spawn().build();
     world.spawn().with_dynamic(comp_id).build();
     let query = world.query_dynamic([FetchType::Immut(comp_id)]);
-    fn func<const N: usize>(mut query: DynamicQuery<N>) {
+    fn func<const N: usize>(mut query: DynQuery<N>) {
         let mut ran = false;
         for _ in query.iter() {
             ran = true;

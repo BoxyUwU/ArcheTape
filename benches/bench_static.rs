@@ -145,9 +145,23 @@ pub mod frag_iter_200 {
         }
 
         pub fn run(&mut self) {
-            for (data,) in self.0.query::<(&mut Data,)>().iter() {
-                data.0 *= 2.;
-            }
+            let mut q = self.0.query::<(&mut Data,)>();
+            q.iter().for_each(|(data,)| data.0 *= 2.);
+
+            // Slow
+            // while let Some((data,)) = q.next() {
+            //     data.0 *= 2.;
+            // }
+
+            // Fast- 66% speedup
+            // pub fn foo<'a>(
+            //     mut q: QueryIter<'a, (&mut Data,)>,
+            // ) {
+            //     while let Some((data,)) = q.next() {
+            //         data.0 *= 2.;
+            //     }
+            // }
+            // foo(q);
         }
     }
 }

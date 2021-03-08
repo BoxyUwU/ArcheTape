@@ -5,16 +5,16 @@ use std::{any::TypeId, marker::PhantomData};
 // arguments of functions even though QueryTuple has a 'static bound in its trait definition
 pub struct StaticQuery<'a, Q: QueryTuple + 'static> {
     world: &'a World,
-    _guards: <Q as GuardAssocType<'a>>::Guards,
+    _guards: <Q as QueryTupleGATs<'a>>::Guards,
     fetches: Q::Fetches,
     // Signifies that some of the EcsIds being fetched do not exist
     incomplete: bool,
     _p: PhantomData<Q>,
 }
 
-pub struct QueryIter<'a, Q: QueryTuple, I: Iterator<Item = &'a Archetype>> {
+pub struct StaticQueryIter<'a, Q: QueryTuple + 'static> {
     fetches: &'a Q::Fetches,
-    archetypes: I,
+    archetypes: <Q as QueryTupleGATs<'a>>::ArchetypeIter,
     intra_iter: IntraArchetypeIter<'a, Q>,
 }
 
@@ -24,18 +24,17 @@ struct IntraArchetypeIter<'a, Q: QueryTuple> {
     _p: PhantomData<(Q, &'a Archetype)>,
 }
 
-pub trait GuardAssocType<'a>: 'static {
+pub trait QueryTupleGATs<'a>: 'static {
     type Guards: 'a;
+    type ArchetypeIter: 'a;
 }
-pub trait QueryTuple: Sized + for<'a> GuardAssocType<'a> + 'static {
+pub trait QueryTuple: Sized + for<'a> QueryTupleGATs<'a> + 'static {
     type Ptrs: Copy;
     type Fetches;
 
     fn new<'a>(world: &'a World) -> StaticQuery<'a, Self>;
 
-    fn iter<'a, 'b>(
-        q: &'a mut StaticQuery<'b, Self>,
-    ) -> QueryIter<'a, Self, Box<dyn Iterator<Item = &'a Archetype> + 'a>>;
+    fn iter<'a, 'b>(q: &'a mut StaticQuery<'b, Self>) -> StaticQueryIter<'a, Self>;
 
     fn get(world: &World, entity: EcsId) -> Option<Self::Ptrs>;
 }
@@ -51,7 +50,7 @@ macro_rules! impl_query_tuple {
                 StaticQuery::<($($T,)*)>::new(world)
             }
 
-            fn iter<'a, 'b>(q: &'a mut StaticQuery<'b, Self>) -> QueryIter<'a, Self, Box<dyn Iterator<Item = &'a Archetype> + 'a>> {
+            fn iter<'a, 'b>(q: &'a mut StaticQuery<'b, Self>) -> StaticQueryIter<'a, Self> {
                 q.iter()
             }
 
@@ -59,28 +58,26 @@ macro_rules! impl_query_tuple {
                 let meta = world.get_entity_meta(entity)?.instance_meta.clone();
                 let archetype = &world.archetypes[meta.archetype.0];
 
-                match meta.index < archetype.entities.len() {
+                Some(match meta.index < archetype.entities.len() {
                     true => {
-                        let mut n = 0;
-                        Some([
-                            $(
-                                unsafe {
-                                    let mut ptr = $T::create_ptr(archetype, &$T::fetch_type(world)?)?;
-                                    $T::offset_ptr(&mut ptr, meta.index);
-                                    ptr
-                                },
-                            )*
-                        ])
+                        [$(
+                            unsafe {
+                                let mut ptr = $T::create_ptr(archetype, &$T::fetch_type(world)?)?;
+                                $T::offset_ptr(&mut ptr, meta.index);
+                                ptr
+                            },
+                        )*]
                     }
                     false => {
-                        None
+                        return None;
                     }
-                }
+                })
             }
         }
 
-        impl<'a, $($T: for<'b> QueryParam<'b>),*> GuardAssocType<'a> for ($($T,)*) {
+        impl<'a, $($T: for<'b> QueryParam<'b>),*> QueryTupleGATs<'a> for ($($T,)*) {
             type Guards = [EitherGuard<'a>; $N];
+            type ArchetypeIter = crate::world::ArchetypeIter<'a, $N>;
         }
 
         impl<'a, $($T: for<'b> QueryParam<'b>,)*> StaticQuery<'a, ($($T,)*)> {
@@ -120,12 +117,13 @@ macro_rules! impl_query_tuple {
                 }
             }
 
+            #[allow(non_snake_case)]
             pub fn get(&mut self, entity: EcsId) -> Option<($(<$T as QueryParam<'_>>::Returns,)*)> {
                 let [$($T,)*] = <($($T,)*)>::get(&self.world, entity)?;
                 Some(($($T::cast_ptr($T),)*))
             }
 
-            pub fn iter(&mut self) -> QueryIter<($($T,)*), Box<dyn Iterator<Item = &Archetype> + '_>> {
+            pub fn iter(&mut self) -> StaticQueryIter<($($T,)*)> {
                 let archetype_iter = if self.incomplete {
                     let identity: fn(_) -> _ = |x| x;
                     use std::convert::TryInto;
@@ -160,28 +158,27 @@ macro_rules! impl_query_tuple {
                     self.world.query_archetypes(iters, bit_length)
                 };
 
-                QueryIter {
+                StaticQueryIter {
                     fetches: &self.fetches,
-                    archetypes: Box::new(archetype_iter),
+                    archetypes: archetype_iter,
                     intra_iter: IntraArchetypeIter::<($($T,)*)>::unit(),
                 }
             }
         }
 
-        impl<'a, $($T: for<'b> QueryParam<'b>,)* I> Iterator for QueryIter<'a, ($($T,)*), I>
-            where I: Iterator<Item = &'a Archetype> {
+        impl<'a, $($T: for<'b> QueryParam<'b>,)*> Iterator for StaticQueryIter<'a, ($($T,)*)> {
                 type Item = ($(<$T as QueryParam<'a>>::Returns,)*);
 
+                #[allow(non_snake_case)]
                 #[allow(unused_assignments)]
+                #[inline(always)]
                 fn next(&mut self) -> Option<Self::Item> {
                     loop {
                         match self.intra_iter.next() {
-                            Some(ptrs) => {
-                                let mut n = 0;
-                                return Some(($({
-                                    n+=1;
-                                    $T::cast_ptr(ptrs[n-1])
-                                },)*));
+                            Some([$($T,)*]) => {
+                                return Some((
+                                    $($T::cast_ptr($T),)*
+                                ));
                             }
                             None => {
                                 let archetype = self.archetypes.next()?;

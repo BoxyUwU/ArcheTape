@@ -130,7 +130,7 @@ impl Entities {
         let &(alive, stored_generation) = self
             .generations
             .get(entity.uindex())
-            .unwrap_or_else(|| panic!(format!("could not get generation for {}", entity)));
+            .unwrap_or_else(|| panic!("could not get generation for {}", entity));
         let generation = entity.generation().0;
         alive && generation == stored_generation
     }

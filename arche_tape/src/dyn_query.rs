@@ -51,17 +51,14 @@ impl<'a, const N: usize> Iterator for IntraArchetypeIter<'a, N> {
     }
 }
 
-pub struct QueryIter<'a, I: Iterator<Item = &'a Archetype>, const N: usize> {
+pub struct DynQueryIter<'a, const N: usize> {
     comp_ids: [Option<EcsId>; N],
     create_ptr: [fn(&Archetype, Option<EcsId>) -> (*mut u8, usize); N],
-    archetype_iter: I,
+    archetype_iter: crate::world::ArchetypeIter<'a, N>,
     intra_iter: IntraArchetypeIter<'a, N>,
 }
 
-impl<'a, I, const N: usize> Iterator for QueryIter<'a, I, N>
-where
-    I: Iterator<Item = &'a Archetype>,
-{
+impl<'a, const N: usize> Iterator for DynQueryIter<'a, N> {
     type Item = [*mut u8; N];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -125,7 +122,7 @@ impl FetchType {
     }
 }
 
-pub struct DynamicQuery<'a, const N: usize> {
+pub struct DynQuery<'a, const N: usize> {
     world: &'a World,
     _guards: [EitherGuard<'a>; N],
     fetches: [FetchType; N],
@@ -134,7 +131,7 @@ pub struct DynamicQuery<'a, const N: usize> {
     incomplete: bool,
 }
 
-impl<'a, const N: usize> DynamicQuery<'a, N> {
+impl<'a, const N: usize> DynQuery<'a, N> {
     pub(crate) fn new(world: &'a World, fetches: [FetchType; N]) -> Self {
         let mut incomplete = false;
 
@@ -167,7 +164,7 @@ impl<'a, const N: usize> DynamicQuery<'a, N> {
         }
     }
 
-    pub fn iter(&mut self) -> QueryIter<'_, impl Iterator<Item = &'_ Archetype>, N> {
+    pub fn iter(&mut self) -> DynQueryIter<'_, N> {
         const NONE_ID: Option<EcsId> = None;
         let mut ecs_ids = [NONE_ID; N];
         for (fetch, ecs_id) in self.fetches.iter().zip(ecs_ids.iter_mut()) {
@@ -219,7 +216,7 @@ impl<'a, const N: usize> DynamicQuery<'a, N> {
             self.world.query_archetypes(iters, bit_length)
         };
 
-        QueryIter {
+        DynQueryIter {
             comp_ids: ecs_ids,
             create_ptr,
             archetype_iter,
