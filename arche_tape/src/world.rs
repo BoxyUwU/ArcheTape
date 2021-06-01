@@ -227,6 +227,7 @@ pub struct InstanceMeta {
 pub struct ComponentMeta {
     pub drop_fn: Option<fn(*mut core::mem::MaybeUninit<u8>)>,
     pub layout: core::alloc::Layout,
+    pub is_unit: bool,
 }
 
 fn component_meta_drop_fn<T: Component>(ptr: *mut core::mem::MaybeUninit<u8>) {
@@ -238,6 +239,7 @@ impl ComponentMeta {
         Self {
             drop_fn: None,
             layout: core::alloc::Layout::from_size_align(size, align).unwrap(),
+            is_unit: false,
         }
     }
 
@@ -246,6 +248,7 @@ impl ComponentMeta {
         Self {
             drop_fn: Some(component_meta_drop_fn::<T>),
             layout: core::alloc::Layout::new::<T>(),
+            is_unit: TypeId::of::<T>() == TypeId::of::<()>(),
         }
     }
 
@@ -254,6 +257,7 @@ impl ComponentMeta {
         Self {
             drop_fn: None,
             layout: core::alloc::Layout::new::<()>(),
+            is_unit: true,
         }
     }
 }
@@ -407,18 +411,11 @@ impl World {
             self.get_entity_meta(component_id)
                 .unwrap()
                 .component_meta
-                .layout
-                .size()
-                == 0
+                .is_unit
         );
 
-        let mut component = core::mem::ManuallyDrop::new(());
         unsafe {
-            self.add_component_dynamic_with_data(
-                entity,
-                component_id,
-                &mut component as *mut _ as *mut u8,
-            );
+            self.add_component_dynamic_with_data(entity, component_id, 0x1 as *mut u8);
         }
     }
 }

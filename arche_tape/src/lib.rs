@@ -1,5 +1,4 @@
 #![allow(clippy::bool_comparison)]
-#![feature(unsafe_block_in_unsafe_fn, int_bits_const)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 #[macro_export]

@@ -1,5 +1,4 @@
 #![allow(clippy::bool_comparison)]
-#![feature(unsafe_block_in_unsafe_fn)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use std::{
@@ -26,6 +25,10 @@ impl TypeInfo {
     pub fn new(layout: Layout, drop_fn: Option<fn(*mut MaybeUninit<u8>)>) -> TypeInfo {
         Self { layout, drop_fn }
     }
+
+    pub fn dangling(&self) -> NonNull<u8> {
+        NonNull::new(self.layout.align() as *mut u8).unwrap()
+    }
 }
 
 pub struct UntypedVec {
@@ -48,8 +51,8 @@ impl UntypedVec {
     ///    Make sure that the used EcsId corresponds correctly to the provided TypeInfo
     pub unsafe fn new_from_raw(type_info: TypeInfo) -> Self {
         Self {
+            data: type_info.dangling(),
             type_info,
-            data: NonNull::dangling(),
             cap: 0,
             len: 0,
         }
@@ -397,7 +400,7 @@ mod untyped_vec {
         let untyped_vec = untyped_vec_new::<u32>();
         assert!(untyped_vec.cap == 0);
         assert!(untyped_vec.len == 0);
-        assert!(untyped_vec.data == NonNull::dangling());
+        assert!(untyped_vec.data == untyped_vec.type_info.dangling());
         assert!(untyped_vec.type_info.layout == Layout::new::<u32>());
     }
 
@@ -408,13 +411,13 @@ mod untyped_vec {
         untyped_vec.realloc();
         assert!(untyped_vec.cap == 16);
         assert!(untyped_vec.len == 0);
-        assert!(untyped_vec.data != NonNull::dangling());
+        assert!(untyped_vec.data != untyped_vec.type_info.dangling());
         assert!(untyped_vec.type_info.layout == Layout::new::<u32>());
 
         untyped_vec.realloc();
         assert!(untyped_vec.cap == 32);
         assert!(untyped_vec.len == 0);
-        assert!(untyped_vec.data != NonNull::dangling());
+        assert!(untyped_vec.data != untyped_vec.type_info.dangling());
         assert!(untyped_vec.type_info.layout == Layout::new::<u32>());
     }
 

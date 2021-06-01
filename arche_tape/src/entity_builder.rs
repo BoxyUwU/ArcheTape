@@ -170,9 +170,7 @@ impl<'a> EntityBuilder<'a> {
                 .get_entity_meta(component_id)
                 .unwrap()
                 .component_meta
-                .layout
-                .size()
-                == 0
+                .is_unit
         );
 
         self.comp_ids.push(component_id);
