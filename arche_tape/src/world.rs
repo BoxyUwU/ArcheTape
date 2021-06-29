@@ -347,7 +347,7 @@ impl World {
 
         // TODO: Remove `entity` component from all entities
         for arch in &self.archetypes {
-            if let Some(_) = arch.comp_lookup.get(&entity) {
+            if arch.comp_lookup.get(&entity).is_some() {
                 todo!();
             }
         }
@@ -368,7 +368,7 @@ impl World {
         DynQuery::new(self, ids)
     }
 
-    pub fn query<'a, Q: crate::static_query::QueryTuple>(&'a self) -> StaticQuery<'a, Q> {
+    pub fn query<Q: crate::static_query::QueryTuple>(&self) -> StaticQuery<Q> {
         Q::new(self)
     }
 
@@ -484,8 +484,8 @@ impl World {
     }
 
     pub(crate) fn find_archetype_dynamic(&mut self, comp_ids: &[EcsId]) -> Option<ArchIndex> {
-        if self.archetypes.len() > 0 && comp_ids.len() == 0 {
-            assert!(self.archetypes[0].comp_ids.len() == 0);
+        if !self.archetypes.is_empty() && comp_ids.is_empty() {
+            assert!(self.archetypes[0].comp_ids.is_empty());
             return Some(ArchIndex(0));
         }
 
@@ -506,8 +506,7 @@ impl World {
             .collect::<Box<[_]>>();
 
         BitsetIterator::new(iters, bit_length)
-            .filter(|idx| self.archetypes[*idx].comp_ids.len() == comp_ids.len())
-            .next()
+            .find(|idx| self.archetypes[*idx].comp_ids.len() == comp_ids.len())
             .map(ArchIndex)
     }
 
@@ -541,8 +540,7 @@ impl World {
             .collect::<Box<[_]>>();
 
         BitsetIterator::new(iters, bit_length)
-            .filter(|idx| self.archetypes[*idx].comp_ids.len() == comp_ids.len() + 1)
-            .next()
+            .find(|idx| self.archetypes[*idx].comp_ids.len() == comp_ids.len() + 1)
     }
 
     pub(crate) fn find_archetype_dynamic_minus_id(
@@ -550,8 +548,8 @@ impl World {
         comp_ids: &[EcsId],
         without_id: EcsId,
     ) -> Option<usize> {
-        if self.archetypes.len() > 0 && comp_ids.len() == 1 {
-            assert!(self.archetypes[0].comp_ids.len() == 0);
+        if !self.archetypes.is_empty() && comp_ids.len() == 1 {
+            assert!(self.archetypes[0].comp_ids.is_empty());
             return Some(0);
         }
 
@@ -573,8 +571,7 @@ impl World {
             .collect::<Box<[_]>>();
 
         BitsetIterator::new(iters, bit_length)
-            .filter(|idx| self.archetypes[*idx].comp_ids.len() == comp_ids.len() - 1)
-            .next()
+            .find(|idx| self.archetypes[*idx].comp_ids.len() == comp_ids.len() - 1)
     }
 
     /// # Safety
@@ -696,7 +693,7 @@ impl World {
             cur_storage.swap_move_element_to_other_vec(tar_storage, entity_idx)
         });
 
-        if let None = skipped_idx {
+        if skipped_idx.is_none() {
             assert!(*target_archetype.comp_ids.last_mut().unwrap() == comp_id);
             skipped_idx = Some(target_archetype.component_storages.len() - 1);
         }

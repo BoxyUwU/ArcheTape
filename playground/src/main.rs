@@ -18,7 +18,7 @@ pub fn main() {
     for _ in 0..1_000_000 {
         let mut q = world.query::<(&mut A,)>();
         for &entity in entities.iter() {
-            let (a,) = q.get(entity).unwrap();
+            let _a = q.get(entity).unwrap().0;
         }
     }
 }

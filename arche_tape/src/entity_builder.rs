@@ -29,8 +29,8 @@ impl<'a> Drop for EntityBuilder<'a> {
     fn drop(&mut self) {
         // If it never allocated, don't drop
         if self.cap != 0 {
-            if let None = self.world.entity_builder_reuse {
-                let mut comp_ids = std::mem::replace(&mut self.comp_ids, Vec::new());
+            if self.world.entity_builder_reuse.is_none() {
+                let mut comp_ids = std::mem::take(&mut self.comp_ids);
                 comp_ids.clear();
 
                 let ptr = std::mem::replace(&mut self.data, NonNull::dangling());
@@ -79,7 +79,7 @@ impl<'a> EntityBuilder<'a> {
     }
 
     pub(crate) fn new(world: &'a mut World, entity: EcsId, component_meta: ComponentMeta) -> Self {
-        if let Some(_) = world.entity_builder_reuse {
+        if world.entity_builder_reuse.is_some() {
             return Self::new_from_world_cache(world, entity, component_meta);
         }
 
@@ -105,7 +105,7 @@ impl<'a> EntityBuilder<'a> {
         component_meta: ComponentMeta,
         cap: usize,
     ) -> Self {
-        if let Some(_) = world.entity_builder_reuse {
+        if world.entity_builder_reuse.is_some() {
             return Self::new_from_world_cache(world, entity, component_meta);
         }
 
@@ -146,8 +146,6 @@ impl<'a> EntityBuilder<'a> {
             // Safe because new_size is asserted to be greater than zero
             let new_ptr = unsafe { alloc(layout) };
             self.data = NonNull::new(new_ptr).unwrap_or_else(|| handle_alloc_error(layout));
-
-            self.cap = new_size;
         } else {
             let layout = Layout::from_size_align(self.cap, 1).unwrap();
             // self.data is always allocated using the global allocator
@@ -155,9 +153,8 @@ impl<'a> EntityBuilder<'a> {
             // new_size is asserted to be greater than 0
             let new_ptr = unsafe { realloc(self.data.as_ptr(), layout, new_size) };
             self.data = NonNull::new(new_ptr).unwrap_or_else(|| handle_alloc_error(layout));
-
-            self.cap = new_size;
         }
+        self.cap = new_size;
     }
 
     /// Adds an entity as a dataless component
@@ -207,7 +204,7 @@ impl<'a> EntityBuilder<'a> {
         unsafe {
             std::ptr::copy_nonoverlapping::<MaybeUninit<u8>>(
                 component as *mut _,
-                self.data.as_ptr().offset(self.len as isize) as *mut _,
+                self.data.as_ptr().add(self.len) as *mut _,
                 component_size,
             );
         }
@@ -247,7 +244,7 @@ impl<'a> EntityBuilder<'a> {
                         .1
                         .get_mut()
                         .push_raw(data_ptr.cast());
-                    data_ptr = data_ptr.offset(component_meta.layout.size() as isize);
+                    data_ptr = data_ptr.add(component_meta.layout.size());
                 }
 
                 assert!(
@@ -318,7 +315,7 @@ impl<'a> EntityBuilder<'a> {
             unsafe { untyped_vec.push_raw(data_ptr.cast()) };
             component_storages.push((comp_id, std::cell::UnsafeCell::new(untyped_vec)));
 
-            data_ptr = unsafe { data_ptr.offset(component_meta.layout.size() as isize) };
+            data_ptr = unsafe { data_ptr.add(component_meta.layout.size()) };
         }
 
         self.comp_ids.sort();
@@ -346,7 +343,7 @@ impl<'a> EntityBuilder<'a> {
         Archetype {
             entities: vec![self.entity],
             comp_lookup: lookup,
-            comp_ids: std::mem::replace(&mut self.comp_ids, Vec::new()),
+            comp_ids: std::mem::take(&mut self.comp_ids),
             component_storages,
             add_remove_cache: AddRemoveCache::new(),
         }

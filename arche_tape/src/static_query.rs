@@ -156,7 +156,7 @@ macro_rules! impl_query_tuple {
                             }
                             None => {
                                 let archetype = self.archetypes.next()?;
-                                let mut ptrs = [0x0 as *mut u8; $N];
+                                let mut ptrs = [std::ptr::null_mut::<u8>(); $N];
 
                                 let fetches = self.fetches.as_ref().unwrap();
                                 let mut n = 0;

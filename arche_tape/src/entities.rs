@@ -83,12 +83,17 @@ pub struct Entities {
     pub(crate) despawned: Vec<usize>,
 }
 
-impl Entities {
-    pub fn new() -> Self {
+impl Default for Entities {
+    fn default() -> Self {
         Self {
             generations: Vec::with_capacity(4096),
             despawned: Vec::with_capacity(512),
         }
+    }
+}
+impl Entities {
+    pub fn new() -> Self {
+        Default::default()
     }
 
     pub fn spawn(&mut self) -> EcsId {

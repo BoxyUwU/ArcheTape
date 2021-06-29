@@ -134,7 +134,7 @@ impl UntypedVec {
         }
 
         // Safe because we are offsetting within allocated memory and cap is < isize::MAX
-        let dst: *mut u8 = unsafe { self.data.as_ptr().offset(self.len as isize) };
+        let dst: *mut u8 = unsafe { self.data.as_ptr().add(self.len) };
         let dst = dst as *mut MaybeUninit<u8>;
 
         unsafe {
@@ -163,7 +163,7 @@ impl UntypedVec {
                     Some(
                         self.data
                             .as_ptr()
-                            .offset({ element * self.type_info.layout.size() } as isize),
+                            .add(element * self.type_info.layout.size()),
                     )
                 }
             } else {
@@ -190,7 +190,7 @@ impl UntypedVec {
                     Some(
                         self.data
                             .as_ptr()
-                            .offset({ element * self.type_info.layout.size() } as isize),
+                            .add(element * self.type_info.layout.size()),
                     )
                 }
             } else {
@@ -214,7 +214,7 @@ impl UntypedVec {
             self.len -= self.type_info.layout.size();
             let ptr = self.data.as_ptr();
             // Safe because we're offsetting inside of the allocation
-            let ptr: *mut u8 = unsafe { ptr.offset(self.len as isize) };
+            let ptr: *mut u8 = unsafe { ptr.add(self.len) };
             let ptr = ptr as *mut MaybeUninit<u8>;
 
             if let Some(drop_fn) = self.type_info.drop_fn {
@@ -248,7 +248,7 @@ impl UntypedVec {
         } else if element == (self.len / self.type_info.layout.size()) - 1 {
             unsafe {
                 // Safe because we're offsetting inside the allocation and len is never >= isize::MAX
-                let to_move = data.offset((element * self.type_info.layout.size()) as isize);
+                let to_move = data.add(element * self.type_info.layout.size());
                 // Safe because we assert that the type_info for self and other are the same.
                 // Safe because we reduce the length of this vec by one which is effectively mem::forget
                 other.push_raw(to_move);
@@ -258,9 +258,9 @@ impl UntypedVec {
         } else {
             unsafe {
                 // Safe because we're offsetting inside the allocation and len is never >= isize::MAX
-                let to_move = data.offset((element * self.type_info.layout.size()) as isize);
+                let to_move = data.add(element * self.type_info.layout.size());
                 let to_swap = data
-                    .offset(self.len as isize)
+                    .add(self.len)
                     .offset(-(self.type_info.layout.size() as isize));
 
                 // Safe because moving the last entry in the vec happens in the other branch
@@ -288,22 +288,17 @@ impl UntypedVec {
             || element == self.len / self.type_info.layout.size() - 1
         {
             assert!(self.len > element);
-            self.pop();
         } else {
             // Safe because we're offsetting inside the allocation and len is never >= isize::MAX
-            let to_move = unsafe { data.offset((element * self.type_info.layout.size()) as isize) };
-            let to_swap = unsafe {
-                data.offset(self.len as isize)
-                    .offset(-(self.type_info.layout.size() as isize))
-            };
+            let to_move = unsafe { data.add(element * self.type_info.layout.size()) };
+            let to_swap = unsafe { data.add(self.len).sub(self.type_info.layout.size()) };
 
             unsafe {
                 // Safe because moving the last entry in the vec happens in the other branch
                 std::ptr::swap_nonoverlapping(to_move, to_swap, self.type_info.layout.size());
             }
-
-            self.pop();
         }
+        self.pop();
     }
 
     /// # Safety

@@ -1,87 +1,82 @@
-pub use bitset_iterator::BitsetIterator;
+use std::{borrow::BorrowMut, marker::PhantomData, slice::Iter};
+pub struct BitsetIterator<'a, Iters>
+where
+    Iters: BorrowMut<[(Iter<'a, usize>, fn(usize) -> usize)]>,
+{
+    phantom: PhantomData<&'a [usize]>,
+    iters: Iters,
 
-mod bitset_iterator {
+    bit_length: u32,
+    index: usize,
 
-    use std::{borrow::BorrowMut, marker::PhantomData, slice::Iter};
-    pub struct BitsetIterator<'a, Iters>
-    where
-        Iters: BorrowMut<[(Iter<'a, usize>, fn(usize) -> usize)]>,
-    {
-        phantom: PhantomData<&'a [usize]>,
-        iters: Iters,
+    bits_remaining: u32,
+    current_bits: usize,
+}
 
-        bit_length: u32,
-        index: usize,
+impl<'a, Iters> BitsetIterator<'a, Iters>
+where
+    Iters: BorrowMut<[(Iter<'a, usize>, fn(usize) -> usize)]>,
+{
+    pub(crate) fn new(iters: Iters, bit_length: u32) -> Self {
+        Self {
+            phantom: PhantomData,
+            iters,
 
-        bits_remaining: u32,
-        current_bits: usize,
-    }
+            bit_length,
+            index: 0,
 
-    impl<'a, Iters> BitsetIterator<'a, Iters>
-    where
-        Iters: BorrowMut<[(Iter<'a, usize>, fn(usize) -> usize)]>,
-    {
-        pub(crate) fn new(iters: Iters, bit_length: u32) -> Self {
-            Self {
-                phantom: PhantomData,
-                iters,
-
-                bit_length,
-                index: 0,
-
-                bits_remaining: 0,
-                current_bits: 0,
-            }
+            bits_remaining: 0,
+            current_bits: 0,
         }
     }
+}
 
-    impl<'a, Iters: BorrowMut<[(Iter<'a, usize>, fn(usize) -> usize)]>> Iterator
-        for BitsetIterator<'a, Iters>
-    {
-        type Item = usize;
+impl<'a, Iters: BorrowMut<[(Iter<'a, usize>, fn(usize) -> usize)]>> Iterator
+    for BitsetIterator<'a, Iters>
+{
+    type Item = usize;
 
-        fn next(&mut self) -> Option<Self::Item> {
-            loop {
-                if self.bits_remaining == 0 {
-                    // We have to initialise filtered to a proper value so we hand write the first iteration of the loop :(
-                    let mut iter = self.iters.borrow_mut().iter_mut();
-                    let (first_iter, first_map) = iter.next()?;
-                    let mut filtered: usize = first_map(*first_iter.next()?);
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.bits_remaining == 0 {
+                // We have to initialise filtered to a proper value so we hand write the first iteration of the loop :(
+                let mut iter = self.iters.borrow_mut().iter_mut();
+                let (first_iter, first_map) = iter.next()?;
+                let mut filtered: usize = first_map(*first_iter.next()?);
 
-                    for (iter, map) in iter {
-                        filtered &= map(*iter.next()?);
-                    }
-
-                    self.bits_remaining = usize::BITS;
-                    self.current_bits = filtered;
+                for (iter, map) in iter {
+                    filtered &= map(*iter.next()?);
                 }
 
-                let zeros = self.current_bits.trailing_zeros();
-
-                // Right shifting leaves zeros in its place so we know we've run out of ones when we hit usize::BITS Number of zeros
-                if zeros == usize::BITS {
-                    self.index += self.bits_remaining as usize;
-                    self.bits_remaining = 0;
-                    continue;
-                }
-
-                self.bits_remaining -= zeros + 1;
-                // rsh by 64 bits on a u64 is an "error" according to rust so we do this
-                self.current_bits >>= 1;
-                self.current_bits >>= zeros;
-                self.index += zeros as usize + 1;
-
-                if self.index > self.bit_length as usize {
-                    // Hack but make sure that calling next() after None is returned continues to return None by
-                    // setting an empty iterator and making the subsequent Next calls try and call next() on it
-                    self.current_bits = 0;
-                    // Indexing by 0 should always be fine since an empty slice will never make it this far
-                    self.iters.borrow_mut()[0].0 = [].iter();
-                    return None;
-                }
-
-                return Some(self.index - 1);
+                self.bits_remaining = usize::BITS;
+                self.current_bits = filtered;
             }
+
+            let zeros = self.current_bits.trailing_zeros();
+
+            // Right shifting leaves zeros in its place so we know we've run out of ones when we hit usize::BITS Number of zeros
+            if zeros == usize::BITS {
+                self.index += self.bits_remaining as usize;
+                self.bits_remaining = 0;
+                continue;
+            }
+
+            self.bits_remaining -= zeros + 1;
+            // rsh by 64 bits on a u64 is an "error" according to rust so we do this
+            self.current_bits >>= 1;
+            self.current_bits >>= zeros;
+            self.index += zeros as usize + 1;
+
+            if self.index > self.bit_length as usize {
+                // Hack but make sure that calling next() after None is returned continues to return None by
+                // setting an empty iterator and making the subsequent Next calls try and call next() on it
+                self.current_bits = 0;
+                // Indexing by 0 should always be fine since an empty slice will never make it this far
+                self.iters.borrow_mut()[0].0 = [].iter();
+                return None;
+            }
+
+            return Some(self.index - 1);
         }
     }
 }
@@ -162,13 +157,14 @@ impl Bitsetsss {
     }
 
     pub(crate) fn insert_bitvec(&mut self, comp_id: EcsId) {
-        if let None = self.bitsets.get(comp_id.uindex()) {
-            self.bitsets
-                .resize_with(comp_id.uindex() + 1, || Bitvec::new());
-            return;
+        match self.bitsets.get(comp_id.uindex()) {
+            None => {
+                self.bitsets.resize_with(comp_id.uindex() + 1, Bitvec::new);
+            }
+            Some(_) => {
+                panic!("Attempted to insert a bitvec that already existed")
+            }
         }
-
-        panic!("Attempted to insert a bitvec that already existed")
     }
 
     pub(crate) fn get_bitvec(&self, comp_id: EcsId) -> Option<&Bitvec> {
