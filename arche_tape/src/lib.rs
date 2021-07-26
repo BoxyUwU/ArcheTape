@@ -1,3 +1,4 @@
+#![feature(generic_associated_types)]
 #![allow(clippy::bool_comparison)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
