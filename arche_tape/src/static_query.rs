@@ -5,14 +5,14 @@ use std::{any::TypeId, marker::PhantomData};
 // arguments of functions even though QueryTuple has a 'static bound in its trait definition
 pub struct StaticQuery<'a, Q: QueryTuple + 'static> {
     world: &'a World,
-    _guards: <Q as QueryTupleGATs<'a>>::Guards,
+    _guards: <Q as QueryTuple>::Guard<'a>,
     fetches: Option<Q::Fetches>,
     _p: PhantomData<Q>,
 }
 
 pub struct StaticQueryIter<'a, Q: QueryTuple + 'static> {
     fetches: Option<&'a Q::Fetches>,
-    archetypes: <Q as QueryTupleGATs<'a>>::ArchetypeIter,
+    archetypes: <Q as QueryTuple>::ArchetypeIter<'a>,
     intra_iter: IntraArchetypeIter<'a, Q>,
 }
 
@@ -22,11 +22,9 @@ struct IntraArchetypeIter<'a, Q: QueryTuple> {
     _p: PhantomData<(Q, &'a Archetype)>,
 }
 
-pub trait QueryTupleGATs<'a>: 'static {
-    type Guards: 'a;
-    type ArchetypeIter: 'a;
-}
-pub trait QueryTuple: Sized + for<'a> QueryTupleGATs<'a> + 'static {
+pub trait QueryTuple: Sized + 'static {
+    type Guard<'a>;
+    type ArchetypeIter<'a>;
     type Ptrs: Copy;
     type Fetches;
 
@@ -35,7 +33,9 @@ pub trait QueryTuple: Sized + for<'a> QueryTupleGATs<'a> + 'static {
 
 macro_rules! impl_query_tuple {
     ($($T:ident)* $N:literal) => {
-        impl<$($T: for<'a> QueryParam<'a>),*> QueryTuple for ($($T,)*) {
+        impl<$($T: QueryParam),*> QueryTuple for ($($T,)*) {
+            type Guard<'a> = [EitherGuard<'a>; $N];
+            type ArchetypeIter<'a> = crate::world::ArchetypeIter<'a, $N>;
             type Ptrs = [*mut u8; $N];
             type Fetches = [crate::FetchType; $N];
 
@@ -44,12 +44,7 @@ macro_rules! impl_query_tuple {
             }
         }
 
-        impl<'a, $($T: for<'b> QueryParam<'b>),*> QueryTupleGATs<'a> for ($($T,)*) {
-            type Guards = [EitherGuard<'a>; $N];
-            type ArchetypeIter = crate::world::ArchetypeIter<'a, $N>;
-        }
-
-        impl<'a, $($T: for<'b> QueryParam<'b>,)*> StaticQuery<'a, ($($T,)*)> {
+        impl<'a, $($T: QueryParam,)*> StaticQuery<'a, ($($T,)*)> {
             #[allow(non_snake_case)]
             pub(crate) fn new(world: &'a World) -> Self {
                 let fetches = (|| {
@@ -84,7 +79,7 @@ macro_rules! impl_query_tuple {
             }
 
             #[allow(non_snake_case)]
-            pub fn get(&mut self, entity: EcsId) -> Option<($(<$T as QueryParam<'_>>::Returns,)*)> {
+            pub fn get(&mut self, entity: EcsId) -> Option<($(<$T as QueryParam>::Returns<'_>,)*)> {
                 if !self.world.is_alive(entity) {
                     return None;
                 }
@@ -141,8 +136,8 @@ macro_rules! impl_query_tuple {
             }
         }
 
-        impl<'a, $($T: for<'b> QueryParam<'b>,)*> Iterator for StaticQueryIter<'a, ($($T,)*)> {
-                type Item = ($(<$T as QueryParam<'a>>::Returns,)*);
+        impl<'a, $($T: QueryParam,)*> Iterator for StaticQueryIter<'a, ($($T,)*)> {
+                type Item = ($(<$T as QueryParam>::Returns<'a>,)*);
 
                 #[allow(non_snake_case, unused_assignments)]
                 #[inline(always)]
@@ -178,7 +173,7 @@ macro_rules! impl_query_tuple {
                 }
         }
 
-        impl<'a, $($T: for<'b> QueryParam<'b>,)*> IntraArchetypeIter<'a, ($($T,)*)> {
+        impl<'a, $($T: QueryParam,)*> IntraArchetypeIter<'a, ($($T,)*)> {
             fn unit() -> Self {
                 Self {
                     remaining: 0,
@@ -188,7 +183,7 @@ macro_rules! impl_query_tuple {
             }
         }
 
-        impl<'a, $($T: for<'b> QueryParam<'b>,)*> Iterator for IntraArchetypeIter<'a, ($($T,)*)> {
+        impl<'a, $($T: QueryParam,)*> Iterator for IntraArchetypeIter<'a, ($($T,)*)> {
             type Item = [*mut u8; $N];
 
             #[allow(unused_assignments)]
@@ -223,17 +218,17 @@ impl_query_tuple!(A B C 3);
 impl_query_tuple!(A B 2);
 impl_query_tuple!(A 1);
 
-pub trait QueryParam<'a>: 'static {
-    type Returns: 'a;
+pub trait QueryParam: 'static {
+    type Returns<'a>;
 
     fn fetch_type(world: &World) -> Option<FetchType>;
     fn create_ptr(archetype: &Archetype, fetch: &FetchType) -> Option<*mut u8>;
     fn offset_ptr(ptr: &mut *mut u8, elements: usize);
-    fn cast_ptr(ptr: *mut u8) -> Self::Returns;
+    fn cast_ptr<'a>(ptr: *mut u8) -> Self::Returns<'a>;
 }
 
-impl<'a, T: Component> QueryParam<'a> for &'static mut T {
-    type Returns = &'a mut T;
+impl<T: Component> QueryParam for &'static mut T {
+    type Returns<'a> = &'a mut T;
 
     fn fetch_type(world: &World) -> Option<FetchType> {
         let id = *world.type_id_to_ecs_id.get(&TypeId::of::<T>())?;
@@ -250,12 +245,12 @@ impl<'a, T: Component> QueryParam<'a> for &'static mut T {
         *ptr = unsafe { ((*ptr) as *mut T).add(elements) as *mut u8 };
     }
 
-    fn cast_ptr(ptr: *mut u8) -> Self::Returns {
+    fn cast_ptr<'a>(ptr: *mut u8) -> Self::Returns<'a> {
         unsafe { &mut *(ptr as *mut T) }
     }
 }
-impl<'a, T: Component> QueryParam<'a> for &'static T {
-    type Returns = &'a T;
+impl<T: Component> QueryParam for &'static T {
+    type Returns<'a> = &'a T;
 
     fn fetch_type(world: &World) -> Option<FetchType> {
         let id = *world.type_id_to_ecs_id.get(&TypeId::of::<T>())?;
@@ -272,14 +267,14 @@ impl<'a, T: Component> QueryParam<'a> for &'static T {
         *ptr = unsafe { ((*ptr) as *mut T).add(elements) as *mut u8 };
     }
 
-    fn cast_ptr(ptr: *mut u8) -> Self::Returns {
+    fn cast_ptr<'a>(ptr: *mut u8) -> Self::Returns<'a> {
         unsafe { &*(ptr as *mut T) }
     }
 }
 
 pub struct EcsIds;
-impl<'a> QueryParam<'a> for EcsIds {
-    type Returns = EcsId;
+impl QueryParam for EcsIds {
+    type Returns<'a> = EcsId;
 
     fn fetch_type(_: &World) -> Option<FetchType> {
         Some(FetchType::EcsId)
@@ -293,7 +288,7 @@ impl<'a> QueryParam<'a> for EcsIds {
         *ptr = unsafe { ((*ptr) as *mut EcsId).add(elements) as *mut u8 };
     }
 
-    fn cast_ptr(ptr: *mut u8) -> Self::Returns {
+    fn cast_ptr<'a>(ptr: *mut u8) -> Self::Returns<'a> {
         unsafe { *(ptr as *mut EcsId) }
     }
 }
